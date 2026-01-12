@@ -31,6 +31,7 @@ Semantic similarity search for notes using embeddings. Shows a floating popout p
 ## Usage
 - Run `See Connections For Current Note` to show the popout panel.
 - Run `Update All Embeddings` to populate/update `embeddings.json`.
+- When the panel appears it is focused; use `a` for the original note, `b`/`c`/`d`... for results, and `z` to refresh using the current note.
 
 ## Data
 - Embeddings are stored in `embeddings.json` at the vault root.

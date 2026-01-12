@@ -12,6 +12,10 @@ interface EmbeddingEntry {
 
 type EmbeddingsCache = Record<string, EmbeddingEntry | number[]>;
 
+type HotkeyAction =
+  | { type: "open"; path: string }
+  | { type: "refresh" };
+
 interface EmbeddingPluginSettings {
   apiKey: string;
   apiBaseUrl: string;
@@ -38,29 +42,57 @@ class SimilarityPanel {
   private app: App;
   private container: HTMLDivElement | null = null;
   private escHandler: ((event: KeyboardEvent) => void) | null = null;
+  private keyHandler: ((event: KeyboardEvent) => void) | null = null;
+  private hotkeys = new Map<string, HotkeyAction>();
+  private onAction: (action: HotkeyAction) => void;
 
-  constructor(app: App) {
+  constructor(app: App, onAction: (action: HotkeyAction) => void) {
     this.app = app;
+    this.onAction = onAction;
   }
 
-  open(headerText: string, items: SimilarityItem[], message?: string, status?: string) {
+  open(
+    headerText: string,
+    items: SimilarityItem[],
+    message?: string,
+    status?: string,
+    hotkeys?: Map<string, HotkeyAction>
+  ) {
     this.close();
     this.container = this.createPanelShell();
     if (!this.container) {
       return;
     }
+    this.hotkeys = hotkeys ?? new Map<string, HotkeyAction>();
     this.render(headerText, items, message, status);
   }
 
-  update(headerText: string, items: SimilarityItem[], message?: string, status?: string) {
+  update(
+    headerText: string,
+    items: SimilarityItem[],
+    message?: string,
+    status?: string,
+    hotkeys?: Map<string, HotkeyAction>
+  ) {
     if (!this.container) {
       return;
     }
+    this.hotkeys = hotkeys ?? this.hotkeys;
     this.render(headerText, items, message, status);
+  }
+
+  focus() {
+    if (this.container) {
+      this.container.focus();
+    }
   }
 
   close() {
     if (this.container) {
+      if (this.keyHandler) {
+        this.container.removeEventListener("keydown", this.keyHandler);
+        this.keyHandler = null;
+      }
       this.container.remove();
       this.container = null;
     }
@@ -74,6 +106,7 @@ class SimilarityPanel {
     try {
       const container = document.createElement("div");
       container.id = PANEL_ID;
+      container.tabIndex = 0;
       Object.assign(container.style, {
         position: "fixed",
         top: "5%",
@@ -143,6 +176,7 @@ class SimilarityPanel {
       requestAnimationFrame(() => {
         container.style.opacity = "1";
         container.style.transform = "translateX(calc(10% + 5vw)) translateY(0)";
+        container.focus();
       });
 
       // @@@panel-lifecycle - ensure only one ESC handler exists for the floating panel
@@ -152,6 +186,24 @@ class SimilarityPanel {
         }
       };
       document.addEventListener("keydown", this.escHandler);
+
+      this.keyHandler = (event: KeyboardEvent) => {
+        if (event.metaKey || event.ctrlKey || event.altKey) {
+          return;
+        }
+        const key = event.key.toLowerCase();
+        if (key.length !== 1) {
+          return;
+        }
+        const action = this.hotkeys.get(key);
+        if (!action) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        this.onAction(action);
+      };
+      container.addEventListener("keydown", this.keyHandler);
 
       return container;
     } catch (error) {
@@ -232,6 +284,25 @@ class SimilarityPanel {
         whiteSpace: "nowrap",
       });
 
+      if (item.hotkey) {
+        const keyBadge = document.createElement("span");
+        keyBadge.textContent = item.hotkey;
+        Object.assign(keyBadge.style, {
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: "18px",
+          height: "18px",
+          marginRight: "8px",
+          borderRadius: "4px",
+          backgroundColor: "var(--background-modifier-border)",
+          color: "var(--text-muted)",
+          fontSize: "0.8em",
+          textTransform: "uppercase",
+        });
+        resultItem.appendChild(keyBadge);
+      }
+
       const scoreContainer = document.createElement("div");
       Object.assign(scoreContainer.style, {
         display: "flex",
@@ -285,6 +356,7 @@ interface SimilarityItem {
   path: string;
   displayName: string;
   score: number;
+  hotkey?: string;
 }
 
 export default class EmbeddingPlugin extends Plugin {
@@ -297,7 +369,16 @@ export default class EmbeddingPlugin extends Plugin {
     await this.loadSettings();
     console.log("[embedding] settings loaded", this.settings);
 
-    this.panel = new SimilarityPanel(this.app);
+    this.panel = new SimilarityPanel(this.app, (action) => {
+      if (action.type === "open") {
+        this.app.workspace.openLinkText(action.path, "", false);
+        window.setTimeout(() => this.panel.focus(), 0);
+        return;
+      }
+      if (action.type === "refresh") {
+        this.showConnectionsForCurrentNote();
+      }
+    });
 
     this.addCommand({
       id: "show-connections-current-note",
@@ -363,11 +444,13 @@ export default class EmbeddingPlugin extends Plugin {
     try {
       const cache = await this.loadEmbeddings();
       const initial = await this.getInitialDisplayData(file, cache);
-      this.panel.open(initial.header, initial.items, initial.message);
+      const initialHotkeys = this.buildHotkeys(file.path, initial.items);
+      this.panel.open(initial.header, initial.items, initial.message, undefined, initialHotkeys);
 
       const updated = await this.checkUpdateAndNotify(file, cache);
       if (updated) {
-        this.panel.update(updated.header, updated.items, updated.message, "(Updated)");
+        const updateHotkeys = this.buildHotkeys(file.path, updated.items);
+        this.panel.update(updated.header, updated.items, updated.message, "(Updated)", updateHotkeys);
       }
     } catch (error) {
       console.error("Error showing connections:", error);
@@ -546,6 +629,32 @@ export default class EmbeddingPlugin extends Plugin {
 
     results.sort((a, b) => b.score - a.score);
     return results.slice(0, this.settings.similarityLimit);
+  }
+
+  private buildHotkeys(originalPath: string, items: SimilarityItem[]) {
+    const hotkeys = new Map<string, HotkeyAction>();
+    const letters = "abcdefghijklmnopqrstuvwxyz";
+
+    // @@@hotkey-map - reserve "a" for the original note and "z" for refresh
+    hotkeys.set("a", { type: "open", path: originalPath });
+
+    let letterIndex = 1;
+    for (const item of items) {
+      while (letterIndex < letters.length && letters[letterIndex] === "z") {
+        letterIndex += 1;
+      }
+      if (letterIndex >= letters.length) {
+        break;
+      }
+      const key = letters[letterIndex];
+      item.hotkey = key;
+      hotkeys.set(key, { type: "open", path: item.path });
+      letterIndex += 1;
+    }
+
+    hotkeys.set("z", { type: "refresh" });
+
+    return hotkeys;
   }
 
   private displayNameForPath(path: string) {
