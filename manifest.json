@@ -1,0 +1,10 @@
+{
+  "id": "embedding",
+  "name": "Embedding",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Semantic similarity for notes using embeddings.",
+  "author": "Markcode",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
