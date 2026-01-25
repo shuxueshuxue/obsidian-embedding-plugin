@@ -88,11 +88,11 @@ class SimilarityPanel {
   }
 
   close() {
+    if (this.keyHandler) {
+      document.removeEventListener("keydown", this.keyHandler, { capture: true });
+      this.keyHandler = null;
+    }
     if (this.container) {
-      if (this.keyHandler) {
-        this.container.removeEventListener("keydown", this.keyHandler);
-        this.keyHandler = null;
-      }
       this.container.remove();
       this.container = null;
     }
@@ -187,6 +187,7 @@ class SimilarityPanel {
       };
       document.addEventListener("keydown", this.escHandler);
 
+      // @@@hotkey-capture - capture key events at document level so focus leaks don't break navigation
       this.keyHandler = (event: KeyboardEvent) => {
         if (event.metaKey || event.ctrlKey || event.altKey) {
           return;
@@ -203,7 +204,7 @@ class SimilarityPanel {
         event.stopPropagation();
         this.onAction(action);
       };
-      container.addEventListener("keydown", this.keyHandler);
+      document.addEventListener("keydown", this.keyHandler, { capture: true });
 
       return container;
     } catch (error) {
@@ -345,6 +346,7 @@ class SimilarityPanel {
 
       resultItem.addEventListener("click", () => {
         this.app.workspace.openLinkText(item.path, "", false);
+        window.setTimeout(() => this.focus(), 0);
       });
 
       list.appendChild(resultItem);

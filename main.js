@@ -69,11 +69,11 @@ var SimilarityPanel = class {
     }
   }
   close() {
+    if (this.keyHandler) {
+      document.removeEventListener("keydown", this.keyHandler, { capture: true });
+      this.keyHandler = null;
+    }
     if (this.container) {
-      if (this.keyHandler) {
-        this.container.removeEventListener("keydown", this.keyHandler);
-        this.keyHandler = null;
-      }
       this.container.remove();
       this.container = null;
     }
@@ -175,7 +175,7 @@ var SimilarityPanel = class {
         event.stopPropagation();
         this.onAction(action);
       };
-      container.addEventListener("keydown", this.keyHandler);
+      document.addEventListener("keydown", this.keyHandler, { capture: true });
       return container;
     } catch (error) {
       console.error("Error creating similarity panel:", error);
@@ -302,6 +302,7 @@ var SimilarityPanel = class {
       resultItem.appendChild(scoreContainer);
       resultItem.addEventListener("click", () => {
         this.app.workspace.openLinkText(item.path, "", false);
+        window.setTimeout(() => this.focus(), 0);
       });
       list.appendChild(resultItem);
     }
