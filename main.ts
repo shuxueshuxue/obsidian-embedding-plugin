@@ -873,6 +873,24 @@ export default class EmbeddingPlugin extends Plugin {
     return this.settings.similarityLimit;
   }
 
+  getCherryStudioConfig() {
+    const url = `http://127.0.0.1:${this.settings.mcpPort}/mcp`;
+    return JSON.stringify(
+      {
+        mcpServers: {
+          "obsidian-embedding": {
+            isActive: this.settings.mcpEnabled,
+            name: "obsidian-embedding",
+            type: "http",
+            url,
+          },
+        },
+      },
+      null,
+      2
+    );
+  }
+
   private async getInitialDisplayData(file: TFile, cache: EmbeddingsCache) {
     let header = "Most similar files:";
     let message: string | undefined;
@@ -1290,6 +1308,7 @@ class EmbeddingSettingTab extends PluginSettingTab {
           this.plugin.settings.mcpEnabled = value;
           await this.plugin.saveSettings();
           this.plugin.refreshMcpServer();
+          this.display();
         })
       );
 
@@ -1305,8 +1324,31 @@ class EmbeddingSettingTab extends PluginSettingTab {
             this.plugin.settings.mcpPort = nextPort;
             await this.plugin.saveSettings();
             this.plugin.refreshMcpServer();
+            this.display();
           })
       );
+
+    const cherryConfig = this.plugin.getCherryStudioConfig();
+    new Setting(containerEl)
+      .setName("Cherry Studio JSON")
+      .setDesc("Copy/paste this into Cherry Studio MCP settings.")
+      .addTextArea((text) => {
+        text.setValue(cherryConfig);
+        text.inputEl.readOnly = true;
+        text.inputEl.rows = 8;
+      })
+      .addButton((button) => {
+        button.setButtonText("Copy");
+        button.onClick(async () => {
+          try {
+            await navigator.clipboard.writeText(cherryConfig);
+            new Notice("Cherry Studio config copied.");
+          } catch (error) {
+            console.error("Failed to copy Cherry Studio config:", error);
+            new Notice("Copy failed. See console.");
+          }
+        });
+      });
   }
 }
 
