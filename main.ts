@@ -1,5 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 
+const http = require("http");
+
 const EMBEDDINGS_FILE = "embeddings.json";
 const PANEL_ID = "embedding-similarity-panel";
 const LIST_ID = `${PANEL_ID}-list`;
@@ -16,6 +18,13 @@ type HotkeyAction =
   | { type: "open"; path: string }
   | { type: "refresh" };
 
+interface McpRequest {
+  jsonrpc: string;
+  id?: string | number | null;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
 interface EmbeddingPluginSettings {
   apiKey: string;
   apiBaseUrl: string;
@@ -25,6 +34,8 @@ interface EmbeddingPluginSettings {
   similarityLimit: number;
   batchSize: number;
   autoUpdateOnStartup: boolean;
+  mcpEnabled: boolean;
+  mcpPort: number;
 }
 
 const DEFAULT_SETTINGS: EmbeddingPluginSettings = {
@@ -36,6 +47,8 @@ const DEFAULT_SETTINGS: EmbeddingPluginSettings = {
   similarityLimit: 12,
   batchSize: 32,
   autoUpdateOnStartup: false,
+  mcpEnabled: true,
+  mcpPort: 7345,
 };
 
 class SimilarityPanel {
@@ -365,6 +378,7 @@ export default class EmbeddingPlugin extends Plugin {
   settings!: EmbeddingPluginSettings;
   private panel!: SimilarityPanel;
   private startupUpdateStarted = false;
+  private mcpServer: any | null = null;
 
   async onload() {
     console.log("[embedding] onload begin");
@@ -396,11 +410,13 @@ export default class EmbeddingPlugin extends Plugin {
 
     this.addSettingTab(new EmbeddingSettingTab(this.app, this));
 
+    this.startMcpServer();
     this.scheduleStartupUpdate();
   }
 
   onunload() {
     this.panel?.close();
+    this.stopMcpServer();
   }
 
   private scheduleStartupUpdate() {
@@ -433,6 +449,172 @@ export default class EmbeddingPlugin extends Plugin {
         console.error("Auto update failed:", error);
         new Notice(`Auto update failed: ${error.message}`);
       });
+    });
+  }
+
+  private startMcpServer() {
+    if (!this.settings.mcpEnabled) {
+      console.log("[embedding] MCP server disabled");
+      return;
+    }
+    if (this.mcpServer) {
+      return;
+    }
+
+    // @@@mcp-server - host MCP-style JSON-RPC for semantic search tools
+    this.mcpServer = http.createServer((req: any, res: any) => {
+      this.handleMcpRequest(req, res).catch((error) => {
+        console.error("[embedding] MCP request error:", error);
+        this.sendMcpError(res, null, -32603, String(error.message ?? error));
+      });
+    });
+
+    this.mcpServer.on("error", (error: Error) => {
+      console.error("[embedding] MCP server error:", error);
+      new Notice(`MCP server error: ${error.message}`);
+    });
+
+    this.mcpServer.listen(this.settings.mcpPort, "127.0.0.1", () => {
+      console.log(`[embedding] MCP server listening on ${this.settings.mcpPort}`);
+    });
+  }
+
+  private stopMcpServer() {
+    if (this.mcpServer) {
+      this.mcpServer.close();
+      this.mcpServer = null;
+    }
+  }
+
+  refreshMcpServer() {
+    this.stopMcpServer();
+    this.startMcpServer();
+  }
+
+  private async handleMcpRequest(req: any, res: any) {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/mcp") {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+
+    const body = await this.readRequestBody(req);
+    let payload: McpRequest;
+    try {
+      payload = JSON.parse(body) as McpRequest;
+    } catch (error) {
+      this.sendMcpError(res, null, -32700, "Invalid JSON");
+      return;
+    }
+
+    if (!payload || payload.jsonrpc !== "2.0" || !payload.method) {
+      this.sendMcpError(res, payload?.id ?? null, -32600, "Invalid request");
+      return;
+    }
+
+    const requestId = payload.id ?? null;
+
+    if (payload.method === "initialize") {
+      this.sendMcpResult(res, requestId, {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "embedding-search", version: this.manifest.version },
+      });
+      return;
+    }
+
+    if (payload.method === "tools/list") {
+      this.sendMcpResult(res, requestId, {
+        tools: [
+          {
+            name: "semantic_search_text",
+            description: "Semantic search for a freeform text query.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string" },
+                limit: { type: "number" },
+              },
+              required: ["query"],
+            },
+          },
+          {
+            name: "semantic_search_note",
+            description: "Semantic search for notes related to a given note title or path.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                note: { type: "string" },
+                limit: { type: "number" },
+              },
+              required: ["note"],
+            },
+          },
+          {
+            name: "fetch_note",
+            description: "Fetch the full content of a note by path.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        ],
+      });
+      return;
+    }
+
+    if (payload.method === "tools/call") {
+      const params = payload.params ?? {};
+      const name = params.name as string | undefined;
+      const args = (params.arguments ?? {}) as Record<string, unknown>;
+      if (!name) {
+        this.sendMcpError(res, requestId, -32602, "Missing tool name");
+        return;
+      }
+
+      try {
+        const result = await this.handleToolCall(name, args);
+        this.sendMcpResult(res, requestId, {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: false,
+        });
+      } catch (error) {
+        this.sendMcpError(res, requestId, -32603, String(error.message ?? error));
+      }
+      return;
+    }
+
+    this.sendMcpError(res, requestId, -32601, "Method not found");
+  }
+
+  private sendMcpResult(res: any, id: string | number | null, result: unknown) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id, result }));
+  }
+
+  private sendMcpError(res: any, id: string | number | null, code: number, message: string) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }));
+  }
+
+  private readRequestBody(req: any) {
+    return new Promise<string>((resolve, reject) => {
+      let body = "";
+      req.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf-8");
+      });
+      req.on("end", () => resolve(body));
+      req.on("error", (error: Error) => reject(error));
     });
   }
 
@@ -539,6 +721,156 @@ export default class EmbeddingPlugin extends Plugin {
     }
 
     new Notice(`Embedding update complete. Added: ${added}. Updated: ${updated}.`);
+  }
+
+  private async handleToolCall(name: string, args: Record<string, unknown>) {
+    if (name === "semantic_search_text") {
+      return this.semanticSearchText(args);
+    }
+    if (name === "semantic_search_note") {
+      return this.semanticSearchNote(args);
+    }
+    if (name === "fetch_note") {
+      return this.fetchNoteContent(args);
+    }
+    throw new Error(`Unknown tool: ${name}`);
+  }
+
+  private async semanticSearchText(args: Record<string, unknown>) {
+    const query = String(args.query ?? "").trim();
+    if (!query) {
+      throw new Error("query is required");
+    }
+    const limit = this.normalizeLimit(args.limit);
+    const embedding = await this.getEmbedding(query);
+    if (!embedding) {
+      throw new Error("Failed to generate embedding for query");
+    }
+    const cache = await this.loadEmbeddings();
+    const scores = this.calculateSimilarityScores(embedding, cache, null);
+    const results = await this.buildSearchResults(scores.slice(0, limit));
+    return { query, results };
+  }
+
+  private async semanticSearchNote(args: Record<string, unknown>) {
+    const note = String(args.note ?? "").trim();
+    if (!note) {
+      throw new Error("note is required");
+    }
+    const limit = this.normalizeLimit(args.limit);
+    const file = this.resolveNoteFile(note);
+    const cache = await this.loadEmbeddings();
+    const embedding = await this.ensureEmbeddingForFile(file, cache);
+    const scores = this.calculateSimilarityScores(embedding, cache, file.path);
+    const results = await this.buildSearchResults(scores.slice(0, limit));
+    return { note: file.path, results };
+  }
+
+  private async fetchNoteContent(args: Record<string, unknown>) {
+    const path = String(args.path ?? "").trim();
+    if (!path) {
+      throw new Error("path is required");
+    }
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      throw new Error(`Note not found: ${path}`);
+    }
+    const content = await this.app.vault.read(file);
+    return { path: file.path, content };
+  }
+
+  private async ensureEmbeddingForFile(file: TFile, cache: EmbeddingsCache) {
+    const entry = cache[file.path];
+    const reason = this.getUpdateReason(file, entry, false);
+    if (!reason) {
+      const cachedEmbedding = Array.isArray(entry) ? entry : entry?.embedding;
+      if (!cachedEmbedding) {
+        throw new Error(`Missing embedding for ${file.path}`);
+      }
+      return cachedEmbedding;
+    }
+
+    const text = (await this.app.vault.read(file)).trim();
+    if (!text) {
+      throw new Error(`Note is empty: ${file.path}`);
+    }
+    const embedding = await this.getEmbedding(text);
+    if (!embedding) {
+      throw new Error(`Failed to generate embedding for ${file.path}`);
+    }
+    cache[file.path] = {
+      embedding,
+      last_updated: new Date(file.stat.mtime).toISOString(),
+    };
+    await this.saveEmbeddings(cache);
+    return embedding;
+  }
+
+  private resolveNoteFile(note: string) {
+    const direct = this.app.metadataCache.getFirstLinkpathDest(note, "");
+    if (direct) {
+      return direct;
+    }
+    if (!note.endsWith(".md")) {
+      const withMd = this.app.metadataCache.getFirstLinkpathDest(`${note}.md`, "");
+      if (withMd) {
+        return withMd;
+      }
+    }
+    throw new Error(`Note not found: ${note}`);
+  }
+
+  private calculateSimilarityScores(
+    currentEmbedding: number[],
+    cache: EmbeddingsCache,
+    excludePath: string | null
+  ) {
+    const results: { path: string; score: number }[] = [];
+
+    for (const [path, entry] of Object.entries(cache)) {
+      if (excludePath && path === excludePath) {
+        continue;
+      }
+      if (!path.endsWith(".md")) {
+        continue;
+      }
+      const otherEmbedding = Array.isArray(entry) ? entry : entry.embedding;
+      if (!otherEmbedding) {
+        continue;
+      }
+      const score = cosineSimilarity(currentEmbedding, otherEmbedding);
+      results.push({ path, score });
+    }
+
+    results.sort((a, b) => b.score - a.score);
+    return results;
+  }
+
+  private async buildSearchResults(scores: { path: string; score: number }[]) {
+    const results = [];
+    for (const item of scores) {
+      const file = this.app.vault.getAbstractFileByPath(item.path);
+      if (!(file instanceof TFile)) {
+        throw new Error(`Note not found: ${item.path}`);
+      }
+      const content = await this.app.vault.read(file);
+      const isTruncated = content.length >= 3000;
+      results.push({
+        path: file.path,
+        score: item.score,
+        content: isTruncated ? content.slice(0, 1000) : content,
+        truncated: isTruncated,
+      });
+    }
+    return results;
+  }
+
+  private normalizeLimit(limit: unknown) {
+    const parsed = Number(limit);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    return this.settings.similarityLimit;
   }
 
   private async getInitialDisplayData(file: TFile, cache: EmbeddingsCache) {
@@ -948,6 +1280,32 @@ class EmbeddingSettingTab extends PluginSettingTab {
           this.plugin.settings.autoUpdateOnStartup = value;
           await this.plugin.saveSettings();
         })
+      );
+
+    new Setting(containerEl)
+      .setName("MCP server enabled")
+      .setDesc("Expose semantic search tools over MCP JSON-RPC.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
+          this.plugin.settings.mcpEnabled = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshMcpServer();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("MCP server port")
+      .setDesc("Local port for the MCP server.")
+      .addText((text) =>
+        text
+          .setPlaceholder(String(DEFAULT_SETTINGS.mcpPort))
+          .setValue(String(this.plugin.settings.mcpPort))
+          .onChange(async (value) => {
+            const nextPort = Number(value) || DEFAULT_SETTINGS.mcpPort;
+            this.plugin.settings.mcpPort = nextPort;
+            await this.plugin.saveSettings();
+            this.plugin.refreshMcpServer();
+          })
       );
   }
 }

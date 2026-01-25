@@ -41,6 +41,11 @@ The hotkeys are captured globally while the panel is open, so focus changes do n
 - Run `Update All Embeddings` to populate/update `embeddings.json`.
 - Use `a` for the original note, `b`/`c`/`d`... for results, and `z` to refresh using the current note.
 
+## MCP server
+- JSON-RPC endpoint: `http://127.0.0.1:<port>/mcp`
+- Tools: `semantic_search_text`, `semantic_search_note`, `fetch_note`
+- Search tools return note paths plus content (full < 3k chars, 1k snippet if longer)
+
 ## Data
 - Embeddings are stored in `embeddings.json` at the vault root.
 - The file is created automatically if missing.
