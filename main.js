@@ -643,8 +643,8 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     }
     const cache = await this.loadEmbeddings();
     const scores = this.calculateSimilarityScores(embedding, cache, null);
-    const results = await this.buildSearchResults(scores.slice(0, limit));
-    return { query, results };
+    const { results, missingPaths } = await this.buildSearchResults(scores.slice(0, limit), cache);
+    return { query, results, missingPaths };
   }
   async semanticSearchNote(args) {
     var _a;
@@ -657,8 +657,8 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     const cache = await this.loadEmbeddings();
     const embedding = await this.ensureEmbeddingForFile(file, cache);
     const scores = this.calculateSimilarityScores(embedding, cache, file.path);
-    const results = await this.buildSearchResults(scores.slice(0, limit));
-    return { note: file.path, results };
+    const { results, missingPaths } = await this.buildSearchResults(scores.slice(0, limit), cache);
+    return { note: file.path, results, missingPaths };
   }
   async fetchNoteContent(args) {
     var _a;
@@ -730,12 +730,14 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     results.sort((a, b) => b.score - a.score);
     return results;
   }
-  async buildSearchResults(scores) {
+  async buildSearchResults(scores, cache) {
     const results = [];
+    const missingPaths = [];
     for (const item of scores) {
       const file = this.app.vault.getAbstractFileByPath(item.path);
       if (!(file instanceof import_obsidian.TFile)) {
-        throw new Error(`Note not found: ${item.path}`);
+        missingPaths.push(item.path);
+        continue;
       }
       const content = await this.app.vault.read(file);
       const isTruncated = content.length >= 3e3;
@@ -746,7 +748,14 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
         truncated: isTruncated
       });
     }
-    return results;
+    if (missingPaths.length) {
+      console.warn(`[embedding] MCP removed missing notes: ${missingPaths.join(", ")}`);
+      for (const path of missingPaths) {
+        delete cache[path];
+      }
+      await this.saveEmbeddings(cache);
+    }
+    return { results, missingPaths };
   }
   normalizeLimit(limit) {
     const parsed = Number(limit);

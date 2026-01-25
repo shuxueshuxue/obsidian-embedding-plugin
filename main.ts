@@ -748,8 +748,8 @@ export default class EmbeddingPlugin extends Plugin {
     }
     const cache = await this.loadEmbeddings();
     const scores = this.calculateSimilarityScores(embedding, cache, null);
-    const results = await this.buildSearchResults(scores.slice(0, limit));
-    return { query, results };
+    const { results, missingPaths } = await this.buildSearchResults(scores.slice(0, limit), cache);
+    return { query, results, missingPaths };
   }
 
   private async semanticSearchNote(args: Record<string, unknown>) {
@@ -762,8 +762,8 @@ export default class EmbeddingPlugin extends Plugin {
     const cache = await this.loadEmbeddings();
     const embedding = await this.ensureEmbeddingForFile(file, cache);
     const scores = this.calculateSimilarityScores(embedding, cache, file.path);
-    const results = await this.buildSearchResults(scores.slice(0, limit));
-    return { note: file.path, results };
+    const { results, missingPaths } = await this.buildSearchResults(scores.slice(0, limit), cache);
+    return { note: file.path, results, missingPaths };
   }
 
   private async fetchNoteContent(args: Record<string, unknown>) {
@@ -846,12 +846,17 @@ export default class EmbeddingPlugin extends Plugin {
     return results;
   }
 
-  private async buildSearchResults(scores: { path: string; score: number }[]) {
+  private async buildSearchResults(
+    scores: { path: string; score: number }[],
+    cache: EmbeddingsCache
+  ) {
     const results = [];
+    const missingPaths: string[] = [];
     for (const item of scores) {
       const file = this.app.vault.getAbstractFileByPath(item.path);
       if (!(file instanceof TFile)) {
-        throw new Error(`Note not found: ${item.path}`);
+        missingPaths.push(item.path);
+        continue;
       }
       const content = await this.app.vault.read(file);
       const isTruncated = content.length >= 3000;
@@ -862,7 +867,14 @@ export default class EmbeddingPlugin extends Plugin {
         truncated: isTruncated,
       });
     }
-    return results;
+    if (missingPaths.length) {
+      console.warn(`[embedding] MCP removed missing notes: ${missingPaths.join(", ")}`);
+      for (const path of missingPaths) {
+        delete cache[path];
+      }
+      await this.saveEmbeddings(cache);
+    }
+    return { results, missingPaths };
   }
 
   private normalizeLimit(limit: unknown) {
