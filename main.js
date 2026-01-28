@@ -513,10 +513,30 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       throw new Error(`${EMBEDDINGS_FILE} must contain a JSON object.`);
     }
-    return data;
+    const cache = data;
+    await this.pruneMissingEmbeddings(cache);
+    return cache;
   }
   async saveEmbeddings(cache) {
     await this.app.vault.adapter.write(EMBEDDINGS_FILE, JSON.stringify(cache, null, 2));
+  }
+  async pruneMissingEmbeddings(cache) {
+    let removed = 0;
+    for (const path of Object.keys(cache)) {
+      if (!path.endsWith(".md")) {
+        delete cache[path];
+        removed += 1;
+        continue;
+      }
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof import_obsidian.TFile)) {
+        delete cache[path];
+        removed += 1;
+      }
+    }
+    if (removed > 0) {
+      await this.saveEmbeddings(cache);
+    }
   }
   async getEmbedding(text) {
     this.ensureApiKey();

@@ -623,11 +623,32 @@ export default class EmbeddingPlugin extends Plugin {
       throw new Error(`${EMBEDDINGS_FILE} must contain a JSON object.`);
     }
 
-    return data as EmbeddingsCache;
+    const cache = data as EmbeddingsCache;
+    await this.pruneMissingEmbeddings(cache);
+    return cache;
   }
 
   private async saveEmbeddings(cache: EmbeddingsCache) {
     await this.app.vault.adapter.write(EMBEDDINGS_FILE, JSON.stringify(cache, null, 2));
+  }
+
+  private async pruneMissingEmbeddings(cache: EmbeddingsCache) {
+    let removed = 0;
+    for (const path of Object.keys(cache)) {
+      if (!path.endsWith(".md")) {
+        delete cache[path];
+        removed += 1;
+        continue;
+      }
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) {
+        delete cache[path];
+        removed += 1;
+      }
+    }
+    if (removed > 0) {
+      await this.saveEmbeddings(cache);
+    }
   }
 
   private async getEmbedding(text: string): Promise<number[] | null> {
