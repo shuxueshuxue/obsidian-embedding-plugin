@@ -1,11 +1,25 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
-
-const http = require("http");
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } from "obsidian";
+import * as http from "http";
 
 const EMBEDDINGS_FILE = "embeddings.json";
 const PANEL_ID = "embedding-similarity-panel";
 const LIST_ID = `${PANEL_ID}-list`;
 const HEADER_ID = `${PANEL_ID}-header`;
+const PANEL_CLASS = "embedding-similarity-panel";
+const PANEL_VISIBLE_CLASS = "is-visible";
+const HEADER_CLASS = "embedding-similarity-header";
+const STATUS_CLASS = "embedding-similarity-status";
+const CLOSE_CLASS = "embedding-similarity-close";
+const LIST_CLASS = "embedding-similarity-list";
+const MESSAGE_CLASS = "embedding-similarity-message";
+const EMPTY_CLASS = "embedding-similarity-empty";
+const ITEM_CLASS = "embedding-similarity-item";
+const ITEM_LEFT_CLASS = "embedding-similarity-item-left";
+const HOTKEY_CLASS = "embedding-similarity-hotkey";
+const TITLE_CLASS = "embedding-similarity-title";
+const SCORE_CLASS = "embedding-similarity-score";
+const SCORE_BAR_CLASS = "embedding-similarity-score-bar";
+const SCORE_TEXT_CLASS = "embedding-similarity-score-text";
 
 interface EmbeddingEntry {
   embedding: number[];
@@ -53,14 +67,20 @@ const DEFAULT_SETTINGS: EmbeddingPluginSettings = {
 
 class SimilarityPanel {
   private app: App;
+  private registerDomEvent: Plugin["registerDomEvent"];
   private container: HTMLDivElement | null = null;
   private escHandler: ((event: KeyboardEvent) => void) | null = null;
   private keyHandler: ((event: KeyboardEvent) => void) | null = null;
   private hotkeys = new Map<string, HotkeyAction>();
   private onAction: (action: HotkeyAction) => void;
 
-  constructor(app: App, onAction: (action: HotkeyAction) => void) {
+  constructor(
+    app: App,
+    registerDomEvent: Plugin["registerDomEvent"],
+    onAction: (action: HotkeyAction) => void
+  ) {
     this.app = app;
+    this.registerDomEvent = registerDomEvent;
     this.onAction = onAction;
   }
 
@@ -105,100 +125,56 @@ class SimilarityPanel {
       document.removeEventListener("keydown", this.keyHandler, { capture: true });
       this.keyHandler = null;
     }
-    if (this.container) {
-      this.container.remove();
-      this.container = null;
-    }
     if (this.escHandler) {
       document.removeEventListener("keydown", this.escHandler);
       this.escHandler = null;
+    }
+    if (this.container) {
+      const container = this.container;
+      container.removeClass(PANEL_VISIBLE_CLASS);
+      window.setTimeout(() => {
+        container.remove();
+      }, 200);
+      this.container = null;
     }
   }
 
   private createPanelShell(): HTMLDivElement | null {
     try {
-      const container = document.createElement("div");
+      const container = document.body.createDiv({ cls: PANEL_CLASS });
       container.id = PANEL_ID;
       container.tabIndex = 0;
-      Object.assign(container.style, {
-        position: "fixed",
-        top: "5%",
-        left: "50%",
-        padding: "20px",
-        backgroundColor: "var(--background-primary)",
-        borderRadius: "8px",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-        zIndex: "9999",
-        maxHeight: "100vh",
-        overflowY: "auto",
-        color: "var(--text-normal)",
-        maxWidth: "min(600px, 90vw)",
-        fontFamily: "var(--font-interface, sans-serif)",
-        fontSize: "var(--font-ui-normal, 15px)",
-        transition: "opacity 0.3s ease-out, transform 0.3s ease-out",
-        opacity: "0",
-        transform: "translateX(calc(-50% + 5vw)) translateY(-10px)",
-      });
+      container.setAttribute("role", "dialog");
+      container.setAttribute("aria-label", "Similarity panel");
+      container.setAttribute("aria-modal", "false");
 
-      const header = document.createElement("h3");
+      const header = container.createEl("h3", { cls: HEADER_CLASS });
       header.id = HEADER_ID;
-      Object.assign(header.style, {
-        marginTop: "0",
-        marginBottom: "15px",
-        color: "var(--text-muted)",
-        fontWeight: "600",
-      });
-      container.appendChild(header);
 
-      const closeButton = document.createElement("button");
-      closeButton.textContent = "x";
-      closeButton.setAttribute("aria-label", "Close Similarity Panel");
-      Object.assign(closeButton.style, {
-        position: "absolute",
-        top: "10px",
-        right: "10px",
-        background: "none",
-        border: "none",
-        fontSize: "20px",
-        color: "var(--text-muted)",
-        cursor: "pointer",
-        padding: "0 5px",
-        lineHeight: "1",
+      const closeButton = container.createEl("button", {
+        cls: CLOSE_CLASS,
+        text: "×",
+        attr: { "aria-label": "Close similarity panel", type: "button" },
       });
       closeButton.addEventListener("click", () => {
-        if (!this.container) {
-          return;
-        }
-        this.container.style.opacity = "0";
-        this.container.style.transform = "translateX(calc(-50% + 5vw)) translateY(-10px)";
-        window.setTimeout(() => this.close(), 300);
+        this.close();
       });
-      container.appendChild(closeButton);
 
-      const resultsList = document.createElement("div");
+      const resultsList = container.createDiv({ cls: LIST_CLASS });
       resultsList.id = LIST_ID;
-      Object.assign(resultsList.style, {
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-      });
-      container.appendChild(resultsList);
-
-      document.body.appendChild(container);
 
       requestAnimationFrame(() => {
-        container.style.opacity = "1";
-        container.style.transform = "translateX(calc(10% + 5vw)) translateY(0)";
-        container.focus();
+        container.addClass(PANEL_VISIBLE_CLASS);
+        this.focus();
       });
 
       // @@@panel-lifecycle - ensure only one ESC handler exists for the floating panel
       this.escHandler = (event: KeyboardEvent) => {
-        if (event.key === "Escape" && document.getElementById(PANEL_ID)) {
+        if (event.key === "Escape" && this.container) {
           this.close();
         }
       };
-      document.addEventListener("keydown", this.escHandler);
+      this.registerDomEvent(document, "keydown", this.escHandler);
 
       // @@@hotkey-capture - capture key events at document level so focus leaks don't break navigation
       this.keyHandler = (event: KeyboardEvent) => {
@@ -217,7 +193,7 @@ class SimilarityPanel {
         event.stopPropagation();
         this.onAction(action);
       };
-      document.addEventListener("keydown", this.keyHandler, { capture: true });
+      this.registerDomEvent(document, "keydown", this.keyHandler, { capture: true });
 
       return container;
     } catch (error) {
@@ -239,130 +215,55 @@ class SimilarityPanel {
 
     header.textContent = headerText;
     if (status) {
-      const statusMarker = document.createElement("span");
-      statusMarker.textContent = ` ${status}`;
-      statusMarker.style.fontSize = "0.8em";
-      statusMarker.style.color = "var(--text-faint)";
-      header.appendChild(statusMarker);
+      const statusMarker = header.createSpan({ cls: STATUS_CLASS, text: status });
+      statusMarker.setAttribute("aria-label", status);
     }
 
-    list.innerHTML = "";
+    list.empty();
 
     if (message) {
-      const messageDiv = document.createElement("div");
-      messageDiv.textContent = message;
-      Object.assign(messageDiv.style, {
-        padding: "10px",
-        color: message.startsWith("Error") ? "var(--text-error)" : "var(--text-faint)",
-      });
-      list.appendChild(messageDiv);
+      const messageDiv = list.createDiv({ cls: MESSAGE_CLASS, text: message });
+      if (message.startsWith("Error")) {
+        messageDiv.addClass("is-error");
+      }
       return;
     }
 
     if (!items.length) {
-      const emptyDiv = document.createElement("div");
-      emptyDiv.textContent = "No similar files found.";
-      Object.assign(emptyDiv.style, {
-        padding: "10px",
-        color: "var(--text-faint)",
-      });
-      list.appendChild(emptyDiv);
+      list.createDiv({ cls: EMPTY_CLASS, text: "No similar files found." });
       return;
     }
 
     for (const item of items) {
-      const resultItem = document.createElement("div");
-      Object.assign(resultItem.style, {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "8px 10px",
-        backgroundColor: "var(--background-secondary)",
-        borderRadius: "4px",
-        cursor: "pointer",
-        transition: "background-color 0.15s ease-in-out",
-      });
-      resultItem.addEventListener("mouseover", () => {
-        resultItem.style.backgroundColor = "var(--background-modifier-hover)";
-      });
-      resultItem.addEventListener("mouseout", () => {
-        resultItem.style.backgroundColor = "var(--background-secondary)";
+      const resultItem = list.createEl("button", {
+        cls: ITEM_CLASS,
+        attr: { type: "button" },
       });
 
-      const filenameSpan = document.createElement("span");
-      filenameSpan.textContent = item.displayName;
-      Object.assign(filenameSpan.style, {
-        marginRight: "15px",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-      });
+      const left = resultItem.createDiv({ cls: ITEM_LEFT_CLASS });
 
       if (item.hotkey) {
-        const keyBadge = document.createElement("span");
-        keyBadge.textContent = item.hotkey;
-        Object.assign(keyBadge.style, {
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minWidth: "18px",
-          height: "18px",
-          marginRight: "8px",
-          borderRadius: "4px",
-          backgroundColor: "var(--background-modifier-border)",
-          color: "var(--text-muted)",
-          fontSize: "0.8em",
-          textTransform: "uppercase",
-        });
-        resultItem.appendChild(keyBadge);
+        left.createSpan({ cls: HOTKEY_CLASS, text: item.hotkey });
       }
 
-      const scoreContainer = document.createElement("div");
-      Object.assign(scoreContainer.style, {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        flexShrink: "0",
-      });
+      left.createSpan({ cls: TITLE_CLASS, text: item.displayName });
 
-      const scoreBar = document.createElement("div");
-      Object.assign(scoreBar.style, {
-        width: "80px",
-        height: "6px",
-        backgroundColor: "var(--background-modifier-border)",
-        borderRadius: "3px",
-        overflow: "hidden",
+      const scoreContainer = resultItem.createDiv({ cls: SCORE_CLASS });
+      const clampedScore = Math.max(0, Math.min(1, item.score));
+      scoreContainer.createEl("progress", {
+        cls: SCORE_BAR_CLASS,
+        attr: { max: "1", value: clampedScore.toFixed(3) },
       });
-
-      const scoreIndicator = document.createElement("div");
-      Object.assign(scoreIndicator.style, {
-        width: `${Math.max(0, Math.min(100, item.score * 100))}%`,
-        height: "100%",
-        backgroundColor: "var(--interactive-accent)",
-        borderRadius: "3px",
+      scoreContainer.createSpan({
+        cls: SCORE_TEXT_CLASS,
+        text: item.score.toFixed(3),
       });
-
-      const scoreText = document.createElement("span");
-      scoreText.textContent = item.score.toFixed(3);
-      Object.assign(scoreText.style, {
-        fontSize: "0.85em",
-        color: "var(--text-muted)",
-        minWidth: "35px",
-        textAlign: "right",
-      });
-
-      scoreBar.appendChild(scoreIndicator);
-      scoreContainer.appendChild(scoreBar);
-      scoreContainer.appendChild(scoreText);
-      resultItem.appendChild(filenameSpan);
-      resultItem.appendChild(scoreContainer);
 
       resultItem.addEventListener("click", () => {
         this.app.workspace.openLinkText(item.path, "", false);
         window.setTimeout(() => this.focus(), 0);
       });
 
-      list.appendChild(resultItem);
     }
   }
 }
@@ -378,14 +279,12 @@ export default class EmbeddingPlugin extends Plugin {
   settings!: EmbeddingPluginSettings;
   private panel!: SimilarityPanel;
   private startupUpdateStarted = false;
-  private mcpServer: any | null = null;
+  private mcpServer: http.Server | null = null;
 
   async onload() {
-    console.log("[embedding] onload begin");
     await this.loadSettings();
-    console.log("[embedding] settings loaded", this.settings);
 
-    this.panel = new SimilarityPanel(this.app, (action) => {
+    this.panel = new SimilarityPanel(this.app, this.registerDomEvent.bind(this), (action) => {
       if (action.type === "open") {
         this.app.workspace.openLinkText(action.path, "", false);
         window.setTimeout(() => this.panel.focus(), 0);
@@ -398,13 +297,13 @@ export default class EmbeddingPlugin extends Plugin {
 
     this.addCommand({
       id: "show-connections-current-note",
-      name: "See Connections For Current Note",
+      name: "See connections for current note",
       callback: () => this.showConnectionsForCurrentNote(),
     });
 
     this.addCommand({
       id: "update-all-embeddings",
-      name: "Update All Embeddings",
+      name: "Update all embeddings",
       callback: () => this.updateAllEmbeddings(),
     });
 
@@ -421,7 +320,6 @@ export default class EmbeddingPlugin extends Plugin {
 
   private scheduleStartupUpdate() {
     if (!this.settings.autoUpdateOnStartup) {
-      console.log("[embedding] auto update on startup disabled");
       return;
     }
 
@@ -431,7 +329,6 @@ export default class EmbeddingPlugin extends Plugin {
         return;
       }
       this.startupUpdateStarted = true;
-      console.log(`[embedding] auto update on startup triggered (${source})`);
       await this.updateAllEmbeddings();
     };
 
@@ -454,7 +351,6 @@ export default class EmbeddingPlugin extends Plugin {
 
   private startMcpServer() {
     if (!this.settings.mcpEnabled) {
-      console.log("[embedding] MCP server disabled");
       return;
     }
     if (this.mcpServer) {
@@ -462,7 +358,7 @@ export default class EmbeddingPlugin extends Plugin {
     }
 
     // @@@mcp-server - host MCP-style JSON-RPC for semantic search tools
-    this.mcpServer = http.createServer((req: any, res: any) => {
+    this.mcpServer = http.createServer((req, res) => {
       this.handleMcpRequest(req, res).catch((error) => {
         console.error("[embedding] MCP request error:", error);
         this.sendMcpError(res, null, -32603, String(error.message ?? error));
@@ -474,9 +370,7 @@ export default class EmbeddingPlugin extends Plugin {
       new Notice(`MCP server error: ${error.message}`);
     });
 
-    this.mcpServer.listen(this.settings.mcpPort, "127.0.0.1", () => {
-      console.log(`[embedding] MCP server listening on ${this.settings.mcpPort}`);
-    });
+    this.mcpServer.listen(this.settings.mcpPort, "127.0.0.1");
   }
 
   private stopMcpServer() {
@@ -491,7 +385,7 @@ export default class EmbeddingPlugin extends Plugin {
     this.startMcpServer();
   }
 
-  private async handleMcpRequest(req: any, res: any) {
+  private async handleMcpRequest(req: http.IncomingMessage, res: http.ServerResponse) {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (url.pathname !== "/mcp") {
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -597,21 +491,21 @@ export default class EmbeddingPlugin extends Plugin {
     this.sendMcpError(res, requestId, -32601, "Method not found");
   }
 
-  private sendMcpResult(res: any, id: string | number | null, result: unknown) {
+  private sendMcpResult(res: http.ServerResponse, id: string | number | null, result: unknown) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id, result }));
   }
 
-  private sendMcpError(res: any, id: string | number | null, code: number, message: string) {
+  private sendMcpError(res: http.ServerResponse, id: string | number | null, code: number, message: string) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }));
   }
 
-  private readRequestBody(req: any) {
+  private readRequestBody(req: http.IncomingMessage) {
     return new Promise<string>((resolve, reject) => {
       let body = "";
-      req.on("data", (chunk: Buffer) => {
-        body += chunk.toString("utf-8");
+      req.on("data", (chunk: Buffer | Uint8Array) => {
+        body += Buffer.from(chunk).toString("utf-8");
       });
       req.on("end", () => resolve(body));
       req.on("error", (error: Error) => reject(error));
@@ -644,7 +538,6 @@ export default class EmbeddingPlugin extends Plugin {
   }
 
   async updateAllEmbeddings(options: { onlyNew?: boolean } = {}) {
-    console.log("[embedding] updateAllEmbeddings start", options);
     const files = this.app.vault.getMarkdownFiles();
     const cache = await this.loadEmbeddings();
     const updateTargets: { file: TFile; reason: string }[] = [];
@@ -661,12 +554,10 @@ export default class EmbeddingPlugin extends Plugin {
     }
 
     if (!updateTargets.length) {
-      console.log("[embedding] updateAllEmbeddings: no files need update");
       new Notice("All notes are up to date.");
       return;
     }
 
-    console.log("[embedding] updateAllEmbeddings: queued", updateTargets.length, "of", files.length);
     let added = 0;
     let updated = 0;
 
@@ -1097,12 +988,13 @@ export default class EmbeddingPlugin extends Plugin {
       return null;
     }
 
-    const response = await fetch(`${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`, {
+    const response = await requestUrl({
+      url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`,
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${this.settings.apiKey}`,
       },
+      contentType: "application/json",
       body: JSON.stringify({
         input: trimmed,
         model: this.settings.model,
@@ -1110,12 +1002,11 @@ export default class EmbeddingPlugin extends Plugin {
       }),
     });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Embedding request failed: ${response.status} ${body}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Embedding request failed: ${response.status} ${response.text}`);
     }
 
-    const result = await response.json();
+    const result = response.json;
     const embedding = result?.data?.[0]?.embedding;
     if (!Array.isArray(embedding)) {
       throw new Error("Embedding response missing embedding data.");
@@ -1145,12 +1036,13 @@ export default class EmbeddingPlugin extends Plugin {
       return texts.map(() => null);
     }
 
-    const response = await fetch(`${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`, {
+    const response = await requestUrl({
+      url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`,
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${this.settings.apiKey}`,
       },
+      contentType: "application/json",
       body: JSON.stringify({
         input: trimmed,
         model: this.settings.model,
@@ -1158,12 +1050,11 @@ export default class EmbeddingPlugin extends Plugin {
       }),
     });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Embedding batch failed: ${response.status} ${body}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Embedding batch failed: ${response.status} ${response.text}`);
     }
 
-    const result = await response.json();
+    const result = response.json;
     if (!Array.isArray(result?.data)) {
       throw new Error("Embedding batch response missing data list.");
     }
@@ -1213,7 +1104,7 @@ class EmbeddingSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API key")
-      .setDesc("OpenAI API key for embeddings.")
+      .setDesc("OpenAI API key used to generate embeddings.")
       .addText((text) =>
         text
           .setPlaceholder("sk-...")
@@ -1239,7 +1130,7 @@ class EmbeddingSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Model")
-      .setDesc("Embedding model name.")
+      .setDesc("Embedding model name to use.")
       .addText((text) =>
         text
           .setPlaceholder(DEFAULT_SETTINGS.model)
@@ -1343,7 +1234,7 @@ class EmbeddingSettingTab extends PluginSettingTab {
     const cherryConfig = this.plugin.getCherryStudioConfig();
     new Setting(containerEl)
       .setName("Cherry Studio JSON")
-      .setDesc("Copy/paste this into Cherry Studio MCP settings.")
+      .setDesc("Copy this into Cherry Studio MCP settings.")
       .addTextArea((text) => {
         text.setValue(cherryConfig);
         text.inputEl.readOnly = true;

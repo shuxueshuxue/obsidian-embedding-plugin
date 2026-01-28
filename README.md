@@ -1,24 +1,24 @@
 # Embedding (Obsidian plugin)
 
-Blazingly fast vault navigation: a floating similarity panel with single-letter hotkeys (`a`/`b`/`c`/... + `z`) lets you jump through related notes without touching the sidebar.
+Semantic, keyboard-first navigation for your vault. This plugin builds embeddings for your notes and opens a floating pop-out panel so you can jump through related ideas without touching the sidebar.
 
-## Core idea
-Open the popout, keep your hands on the keyboard, and fly through the vault:
-- `a` always opens the original note
-- `b`/`c`/`d`... open the ranked similar notes
-- `z` recomputes with the currently opened note as the new original
-
-The hotkeys are captured globally while the panel is open, so focus changes do not break navigation.
+## What it feels like
+- Open the pop-out and stay on the keyboard.
+- `a` always opens the original note.
+- `b`/`c`/`d`… open ranked similar notes.
+- `z` recomputes using the currently open note as the new “original”.
+- Hotkeys are captured while the panel is open, so focus changes do not break navigation.
 
 ## Features
-- Popout similarity panel with single-letter navigation (ESC to close)
-- Update embeddings for all notes in batches
+- Floating similarity panel (ESC closes it)
+- Single-letter navigation with deterministic hotkeys
+- Batch embedding updates for all notes
 - Optional auto-update on startup (same logic as manual update)
 - Configurable model, dimensions, and API base URL
 
 ## Commands
-- `See Connections For Current Note`
-- `Update All Embeddings`
+- `See connections for current note`
+- `Update all embeddings`
 
 ## Settings
 - API key
@@ -29,6 +29,19 @@ The hotkeys are captured globally while the panel is open, so focus changes do n
 - Similarity limit
 - Batch size
 - Auto update on startup
+- MCP server enabled + port
+- Cherry Studio JSON (copy helper)
+
+## MCP server (optional)
+The plugin can expose semantic search over a local MCP JSON-RPC server, so external AI chat apps can query your vault and “learn you better”.
+
+- Endpoint: `http://127.0.0.1:<port>/mcp`
+- Tools: `semantic_search_text`, `semantic_search_note`, `fetch_note`
+- Search tools return note paths plus content (full < 3k chars, 1k snippet if longer)
+- Cherry Studio: open MCP settings → JSON import, then paste the config from the plugin settings
+- Missing notes are reported as `missingPaths` and pruned from `embeddings.json`
+
+The MCP server is **local-only** (127.0.0.1) and can be disabled in settings.
 
 ## Installation (manual)
 1) Copy this folder to `YOUR_VAULT/.obsidian/plugins/embedding/`
@@ -37,21 +50,10 @@ The hotkeys are captured globally while the panel is open, so focus changes do n
 4) Enable the plugin in Obsidian
 
 ## Usage
-- Run `See Connections For Current Note` to show the popout panel.
-- Run `Update All Embeddings` to populate/update `embeddings.json`.
-- Use `a` for the original note, `b`/`c`/`d`... for results, and `z` to refresh using the current note.
-
-## MCP server
-- JSON-RPC endpoint: `http://127.0.0.1:<port>/mcp`
-- Tools: `semantic_search_text`, `semantic_search_note`, `fetch_note`
-- Search tools return note paths plus content (full < 3k chars, 1k snippet if longer)
-- Cherry Studio: open MCP settings → JSON import, then paste the config shown in the plugin settings
-- Missing notes are reported as `missingPaths` and pruned from `embeddings.json`
+1) Configure your API key in settings.
+2) Run `Update all embeddings` once to generate `embeddings.json`.
+3) Run `See connections for current note` to open the pop-out panel.
 
 ## Data
 - Embeddings are stored in `embeddings.json` at the vault root.
 - The file is created automatically if missing.
-
-## Troubleshooting
-- If startup updates do nothing, ensure you built `main.js` and the API key is set.
-- If API calls fail, check the base URL and model name.

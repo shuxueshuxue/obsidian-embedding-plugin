@@ -1,7 +1,9 @@
 "use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -15,6 +17,14 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // main.ts
@@ -24,11 +34,26 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
-var http = require("http");
+var http = __toESM(require("http"));
 var EMBEDDINGS_FILE = "embeddings.json";
 var PANEL_ID = "embedding-similarity-panel";
 var LIST_ID = `${PANEL_ID}-list`;
 var HEADER_ID = `${PANEL_ID}-header`;
+var PANEL_CLASS = "embedding-similarity-panel";
+var PANEL_VISIBLE_CLASS = "is-visible";
+var HEADER_CLASS = "embedding-similarity-header";
+var STATUS_CLASS = "embedding-similarity-status";
+var CLOSE_CLASS = "embedding-similarity-close";
+var LIST_CLASS = "embedding-similarity-list";
+var MESSAGE_CLASS = "embedding-similarity-message";
+var EMPTY_CLASS = "embedding-similarity-empty";
+var ITEM_CLASS = "embedding-similarity-item";
+var ITEM_LEFT_CLASS = "embedding-similarity-item-left";
+var HOTKEY_CLASS = "embedding-similarity-hotkey";
+var TITLE_CLASS = "embedding-similarity-title";
+var SCORE_CLASS = "embedding-similarity-score";
+var SCORE_BAR_CLASS = "embedding-similarity-score-bar";
+var SCORE_TEXT_CLASS = "embedding-similarity-score-text";
 var DEFAULT_SETTINGS = {
   apiKey: "",
   apiBaseUrl: "https://api.openai.com/v1",
@@ -42,12 +67,13 @@ var DEFAULT_SETTINGS = {
   mcpPort: 7345
 };
 var SimilarityPanel = class {
-  constructor(app, onAction) {
+  constructor(app, registerDomEvent, onAction) {
     this.container = null;
     this.escHandler = null;
     this.keyHandler = null;
     this.hotkeys = /* @__PURE__ */ new Map();
     this.app = app;
+    this.registerDomEvent = registerDomEvent;
     this.onAction = onAction;
   }
   open(headerText, items, message, status, hotkeys) {
@@ -76,92 +102,49 @@ var SimilarityPanel = class {
       document.removeEventListener("keydown", this.keyHandler, { capture: true });
       this.keyHandler = null;
     }
-    if (this.container) {
-      this.container.remove();
-      this.container = null;
-    }
     if (this.escHandler) {
       document.removeEventListener("keydown", this.escHandler);
       this.escHandler = null;
     }
+    if (this.container) {
+      const container = this.container;
+      container.removeClass(PANEL_VISIBLE_CLASS);
+      window.setTimeout(() => {
+        container.remove();
+      }, 200);
+      this.container = null;
+    }
   }
   createPanelShell() {
     try {
-      const container = document.createElement("div");
+      const container = document.body.createDiv({ cls: PANEL_CLASS });
       container.id = PANEL_ID;
       container.tabIndex = 0;
-      Object.assign(container.style, {
-        position: "fixed",
-        top: "5%",
-        left: "50%",
-        padding: "20px",
-        backgroundColor: "var(--background-primary)",
-        borderRadius: "8px",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-        zIndex: "9999",
-        maxHeight: "100vh",
-        overflowY: "auto",
-        color: "var(--text-normal)",
-        maxWidth: "min(600px, 90vw)",
-        fontFamily: "var(--font-interface, sans-serif)",
-        fontSize: "var(--font-ui-normal, 15px)",
-        transition: "opacity 0.3s ease-out, transform 0.3s ease-out",
-        opacity: "0",
-        transform: "translateX(calc(-50% + 5vw)) translateY(-10px)"
-      });
-      const header = document.createElement("h3");
+      container.setAttribute("role", "dialog");
+      container.setAttribute("aria-label", "Similarity panel");
+      container.setAttribute("aria-modal", "false");
+      const header = container.createEl("h3", { cls: HEADER_CLASS });
       header.id = HEADER_ID;
-      Object.assign(header.style, {
-        marginTop: "0",
-        marginBottom: "15px",
-        color: "var(--text-muted)",
-        fontWeight: "600"
-      });
-      container.appendChild(header);
-      const closeButton = document.createElement("button");
-      closeButton.textContent = "x";
-      closeButton.setAttribute("aria-label", "Close Similarity Panel");
-      Object.assign(closeButton.style, {
-        position: "absolute",
-        top: "10px",
-        right: "10px",
-        background: "none",
-        border: "none",
-        fontSize: "20px",
-        color: "var(--text-muted)",
-        cursor: "pointer",
-        padding: "0 5px",
-        lineHeight: "1"
+      const closeButton = container.createEl("button", {
+        cls: CLOSE_CLASS,
+        text: "\xD7",
+        attr: { "aria-label": "Close similarity panel", type: "button" }
       });
       closeButton.addEventListener("click", () => {
-        if (!this.container) {
-          return;
-        }
-        this.container.style.opacity = "0";
-        this.container.style.transform = "translateX(calc(-50% + 5vw)) translateY(-10px)";
-        window.setTimeout(() => this.close(), 300);
+        this.close();
       });
-      container.appendChild(closeButton);
-      const resultsList = document.createElement("div");
+      const resultsList = container.createDiv({ cls: LIST_CLASS });
       resultsList.id = LIST_ID;
-      Object.assign(resultsList.style, {
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px"
-      });
-      container.appendChild(resultsList);
-      document.body.appendChild(container);
       requestAnimationFrame(() => {
-        container.style.opacity = "1";
-        container.style.transform = "translateX(calc(10% + 5vw)) translateY(0)";
-        container.focus();
+        container.addClass(PANEL_VISIBLE_CLASS);
+        this.focus();
       });
       this.escHandler = (event) => {
-        if (event.key === "Escape" && document.getElementById(PANEL_ID)) {
+        if (event.key === "Escape" && this.container) {
           this.close();
         }
       };
-      document.addEventListener("keydown", this.escHandler);
+      this.registerDomEvent(document, "keydown", this.escHandler);
       this.keyHandler = (event) => {
         if (event.metaKey || event.ctrlKey || event.altKey) {
           return;
@@ -178,7 +161,7 @@ var SimilarityPanel = class {
         event.stopPropagation();
         this.onAction(action);
       };
-      document.addEventListener("keydown", this.keyHandler, { capture: true });
+      this.registerDomEvent(document, "keydown", this.keyHandler, { capture: true });
       return container;
     } catch (error) {
       console.error("Error creating similarity panel:", error);
@@ -197,117 +180,45 @@ var SimilarityPanel = class {
     }
     header.textContent = headerText;
     if (status) {
-      const statusMarker = document.createElement("span");
-      statusMarker.textContent = ` ${status}`;
-      statusMarker.style.fontSize = "0.8em";
-      statusMarker.style.color = "var(--text-faint)";
-      header.appendChild(statusMarker);
+      const statusMarker = header.createSpan({ cls: STATUS_CLASS, text: status });
+      statusMarker.setAttribute("aria-label", status);
     }
-    list.innerHTML = "";
+    list.empty();
     if (message) {
-      const messageDiv = document.createElement("div");
-      messageDiv.textContent = message;
-      Object.assign(messageDiv.style, {
-        padding: "10px",
-        color: message.startsWith("Error") ? "var(--text-error)" : "var(--text-faint)"
-      });
-      list.appendChild(messageDiv);
+      const messageDiv = list.createDiv({ cls: MESSAGE_CLASS, text: message });
+      if (message.startsWith("Error")) {
+        messageDiv.addClass("is-error");
+      }
       return;
     }
     if (!items.length) {
-      const emptyDiv = document.createElement("div");
-      emptyDiv.textContent = "No similar files found.";
-      Object.assign(emptyDiv.style, {
-        padding: "10px",
-        color: "var(--text-faint)"
-      });
-      list.appendChild(emptyDiv);
+      list.createDiv({ cls: EMPTY_CLASS, text: "No similar files found." });
       return;
     }
     for (const item of items) {
-      const resultItem = document.createElement("div");
-      Object.assign(resultItem.style, {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "8px 10px",
-        backgroundColor: "var(--background-secondary)",
-        borderRadius: "4px",
-        cursor: "pointer",
-        transition: "background-color 0.15s ease-in-out"
+      const resultItem = list.createEl("button", {
+        cls: ITEM_CLASS,
+        attr: { type: "button" }
       });
-      resultItem.addEventListener("mouseover", () => {
-        resultItem.style.backgroundColor = "var(--background-modifier-hover)";
-      });
-      resultItem.addEventListener("mouseout", () => {
-        resultItem.style.backgroundColor = "var(--background-secondary)";
-      });
-      const filenameSpan = document.createElement("span");
-      filenameSpan.textContent = item.displayName;
-      Object.assign(filenameSpan.style, {
-        marginRight: "15px",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      });
+      const left = resultItem.createDiv({ cls: ITEM_LEFT_CLASS });
       if (item.hotkey) {
-        const keyBadge = document.createElement("span");
-        keyBadge.textContent = item.hotkey;
-        Object.assign(keyBadge.style, {
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minWidth: "18px",
-          height: "18px",
-          marginRight: "8px",
-          borderRadius: "4px",
-          backgroundColor: "var(--background-modifier-border)",
-          color: "var(--text-muted)",
-          fontSize: "0.8em",
-          textTransform: "uppercase"
-        });
-        resultItem.appendChild(keyBadge);
+        left.createSpan({ cls: HOTKEY_CLASS, text: item.hotkey });
       }
-      const scoreContainer = document.createElement("div");
-      Object.assign(scoreContainer.style, {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        flexShrink: "0"
+      left.createSpan({ cls: TITLE_CLASS, text: item.displayName });
+      const scoreContainer = resultItem.createDiv({ cls: SCORE_CLASS });
+      const clampedScore = Math.max(0, Math.min(1, item.score));
+      scoreContainer.createEl("progress", {
+        cls: SCORE_BAR_CLASS,
+        attr: { max: "1", value: clampedScore.toFixed(3) }
       });
-      const scoreBar = document.createElement("div");
-      Object.assign(scoreBar.style, {
-        width: "80px",
-        height: "6px",
-        backgroundColor: "var(--background-modifier-border)",
-        borderRadius: "3px",
-        overflow: "hidden"
+      scoreContainer.createSpan({
+        cls: SCORE_TEXT_CLASS,
+        text: item.score.toFixed(3)
       });
-      const scoreIndicator = document.createElement("div");
-      Object.assign(scoreIndicator.style, {
-        width: `${Math.max(0, Math.min(100, item.score * 100))}%`,
-        height: "100%",
-        backgroundColor: "var(--interactive-accent)",
-        borderRadius: "3px"
-      });
-      const scoreText = document.createElement("span");
-      scoreText.textContent = item.score.toFixed(3);
-      Object.assign(scoreText.style, {
-        fontSize: "0.85em",
-        color: "var(--text-muted)",
-        minWidth: "35px",
-        textAlign: "right"
-      });
-      scoreBar.appendChild(scoreIndicator);
-      scoreContainer.appendChild(scoreBar);
-      scoreContainer.appendChild(scoreText);
-      resultItem.appendChild(filenameSpan);
-      resultItem.appendChild(scoreContainer);
       resultItem.addEventListener("click", () => {
         this.app.workspace.openLinkText(item.path, "", false);
         window.setTimeout(() => this.focus(), 0);
       });
-      list.appendChild(resultItem);
     }
   }
 };
@@ -318,10 +229,8 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     this.mcpServer = null;
   }
   async onload() {
-    console.log("[embedding] onload begin");
     await this.loadSettings();
-    console.log("[embedding] settings loaded", this.settings);
-    this.panel = new SimilarityPanel(this.app, (action) => {
+    this.panel = new SimilarityPanel(this.app, this.registerDomEvent.bind(this), (action) => {
       if (action.type === "open") {
         this.app.workspace.openLinkText(action.path, "", false);
         window.setTimeout(() => this.panel.focus(), 0);
@@ -333,12 +242,12 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     });
     this.addCommand({
       id: "show-connections-current-note",
-      name: "See Connections For Current Note",
+      name: "See connections for current note",
       callback: () => this.showConnectionsForCurrentNote()
     });
     this.addCommand({
       id: "update-all-embeddings",
-      name: "Update All Embeddings",
+      name: "Update all embeddings",
       callback: () => this.updateAllEmbeddings()
     });
     this.addSettingTab(new EmbeddingSettingTab(this.app, this));
@@ -352,7 +261,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
   }
   scheduleStartupUpdate() {
     if (!this.settings.autoUpdateOnStartup) {
-      console.log("[embedding] auto update on startup disabled");
       return;
     }
     const run = async (source) => {
@@ -360,7 +268,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
         return;
       }
       this.startupUpdateStarted = true;
-      console.log(`[embedding] auto update on startup triggered (${source})`);
       await this.updateAllEmbeddings();
     };
     this.registerEvent(
@@ -380,7 +287,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
   }
   startMcpServer() {
     if (!this.settings.mcpEnabled) {
-      console.log("[embedding] MCP server disabled");
       return;
     }
     if (this.mcpServer) {
@@ -397,9 +303,7 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
       console.error("[embedding] MCP server error:", error);
       new import_obsidian.Notice(`MCP server error: ${error.message}`);
     });
-    this.mcpServer.listen(this.settings.mcpPort, "127.0.0.1", () => {
-      console.log(`[embedding] MCP server listening on ${this.settings.mcpPort}`);
-    });
+    this.mcpServer.listen(this.settings.mcpPort, "127.0.0.1");
   }
   stopMcpServer() {
     if (this.mcpServer) {
@@ -520,7 +424,7 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     return new Promise((resolve, reject) => {
       let body = "";
       req.on("data", (chunk) => {
-        body += chunk.toString("utf-8");
+        body += Buffer.from(chunk).toString("utf-8");
       });
       req.on("end", () => resolve(body));
       req.on("error", (error) => reject(error));
@@ -550,7 +454,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
   }
   async updateAllEmbeddings(options = {}) {
     var _a;
-    console.log("[embedding] updateAllEmbeddings start", options);
     const files = this.app.vault.getMarkdownFiles();
     const cache = await this.loadEmbeddings();
     const updateTargets = [];
@@ -565,11 +468,9 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
       }
     }
     if (!updateTargets.length) {
-      console.log("[embedding] updateAllEmbeddings: no files need update");
       new import_obsidian.Notice("All notes are up to date.");
       return;
     }
-    console.log("[embedding] updateAllEmbeddings: queued", updateTargets.length, "of", files.length);
     let added = 0;
     let updated = 0;
     for (let i = 0; i < updateTargets.length; i += this.settings.batchSize) {
@@ -945,23 +846,23 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     if (!trimmed) {
       return null;
     }
-    const response = await fetch(`${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`, {
+    const response = await (0, import_obsidian.requestUrl)({
+      url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`,
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${this.settings.apiKey}`
       },
+      contentType: "application/json",
       body: JSON.stringify({
         input: trimmed,
         model: this.settings.model,
         dimensions: this.settings.dimensions
       })
     });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Embedding request failed: ${response.status} ${body}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Embedding request failed: ${response.status} ${response.text}`);
     }
-    const result = await response.json();
+    const result = response.json;
     const embedding = (_b = (_a = result == null ? void 0 : result.data) == null ? void 0 : _a[0]) == null ? void 0 : _b.embedding;
     if (!Array.isArray(embedding)) {
       throw new Error("Embedding response missing embedding data.");
@@ -985,23 +886,23 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     if (!trimmed.length) {
       return texts.map(() => null);
     }
-    const response = await fetch(`${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`, {
+    const response = await (0, import_obsidian.requestUrl)({
+      url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/embeddings`,
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${this.settings.apiKey}`
       },
+      contentType: "application/json",
       body: JSON.stringify({
         input: trimmed,
         model: this.settings.model,
         dimensions: this.settings.dimensions
       })
     });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Embedding batch failed: ${response.status} ${body}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Embedding batch failed: ${response.status} ${response.text}`);
     }
-    const result = await response.json();
+    const result = response.json;
     if (!Array.isArray(result == null ? void 0 : result.data)) {
       throw new Error("Embedding batch response missing data list.");
     }
@@ -1038,7 +939,7 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("API key").setDesc("OpenAI API key for embeddings.").addText(
+    new import_obsidian.Setting(containerEl).setName("API key").setDesc("OpenAI API key used to generate embeddings.").addText(
       (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
@@ -1050,7 +951,7 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Model").setDesc("Embedding model name.").addText(
+    new import_obsidian.Setting(containerEl).setName("Model").setDesc("Embedding model name to use.").addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.model).setValue(this.plugin.settings.model).onChange(async (value) => {
         this.plugin.settings.model = value.trim();
         await this.plugin.saveSettings();
@@ -1104,7 +1005,7 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     const cherryConfig = this.plugin.getCherryStudioConfig();
-    new import_obsidian.Setting(containerEl).setName("Cherry Studio JSON").setDesc("Copy/paste this into Cherry Studio MCP settings.").addTextArea((text) => {
+    new import_obsidian.Setting(containerEl).setName("Cherry Studio JSON").setDesc("Copy this into Cherry Studio MCP settings.").addTextArea((text) => {
       text.setValue(cherryConfig);
       text.inputEl.readOnly = true;
       text.inputEl.rows = 8;
