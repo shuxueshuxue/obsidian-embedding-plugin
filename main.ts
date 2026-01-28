@@ -184,7 +184,7 @@ class SimilarityPanel {
       this.registerDomEvent(document, "keydown", this.keyHandler, { capture: true });
 
       return container;
-    } catch (error) {
+    } catch {
       // console.error("Error creating similarity panel:", error);
       this.close();
       return null;
@@ -324,16 +324,18 @@ export default class EmbeddingPlugin extends Plugin {
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
         run("metadata-resolved").catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
           // console.error("Auto update failed:", error);
-          new Notice(`Auto update failed: ${error.message}`);
+          new Notice(`Auto update failed: ${message}`);
         });
       })
     );
 
     this.app.workspace.onLayoutReady(() => {
       run("layout-ready").catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
         // console.error("Auto update failed:", error);
-        new Notice(`Auto update failed: ${error.message}`);
+        new Notice(`Auto update failed: ${message}`);
       });
     });
   }
@@ -357,9 +359,10 @@ export default class EmbeddingPlugin extends Plugin {
         this.panel.update(updated.header, updated.items, updated.message, "(Updated)", updateHotkeys);
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       // console.error("Error showing connections:", error);
-      new Notice(`Error showing connections: ${error.message}`);
-      this.panel.open("Error", [], `Error: ${error.message}`);
+      new Notice(`Error showing connections: ${message}`);
+      this.panel.open("Error", [], `Error: ${message}`);
     }
   }
 
@@ -652,13 +655,12 @@ export default class EmbeddingPlugin extends Plugin {
       throw new Error(`Embedding request failed: ${response.status} ${response.text}`);
     }
 
-    const result = response.json;
-    const embedding = result?.data?.[0]?.embedding;
-    if (!Array.isArray(embedding)) {
+    const result: unknown = response.json;
+    if (!isEmbeddingApiResponse(result) || result.data.length === 0) {
       throw new Error("Embedding response missing embedding data.");
     }
 
-    return embedding as number[];
+    return result.data[0].embedding;
   }
 
   private async getEmbeddingsBatch(texts: string[]): Promise<Array<number[] | null>> {
@@ -700,8 +702,8 @@ export default class EmbeddingPlugin extends Plugin {
       throw new Error(`Embedding batch failed: ${response.status} ${response.text}`);
     }
 
-    const result = response.json;
-    if (!Array.isArray(result?.data)) {
+    const result: unknown = response.json;
+    if (!isEmbeddingApiResponse(result)) {
       throw new Error("Embedding batch response missing data list.");
     }
 
@@ -710,11 +712,8 @@ export default class EmbeddingPlugin extends Plugin {
     }
 
     const output: Array<number[] | null> = texts.map(() => null);
-    result.data.forEach((item: { embedding?: number[] }, idx: number) => {
+    result.data.forEach((item, idx) => {
       const originalIndex = indexMap[idx];
-      if (!Array.isArray(item.embedding)) {
-        return;
-      }
       output[originalIndex] = item.embedding;
     });
 
@@ -728,7 +727,10 @@ export default class EmbeddingPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loaded: unknown = await this.loadData();
+    const safeLoaded =
+      loaded && typeof loaded === "object" ? (loaded as Partial<EmbeddingPluginSettings>) : {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, safeLoaded);
   }
 
   async saveSettings() {
@@ -750,7 +752,7 @@ class EmbeddingSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API key")
-      .setDesc("Openai api key used to generate embeddings.")
+      .setDesc("OpenAI API key used to generate embeddings.")
       .addText((text) =>
         text
           .setPlaceholder("Enter API key")
@@ -850,6 +852,30 @@ class EmbeddingSettingTab extends PluginSettingTab {
       );
 
   }
+}
+
+type EmbeddingApiItem = { embedding: number[] };
+type EmbeddingApiResponse = { data: EmbeddingApiItem[] };
+
+function isEmbeddingApiResponse(value: unknown): value is EmbeddingApiResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const data = (value as { data?: unknown }).data;
+  if (!Array.isArray(data)) {
+    return false;
+  }
+  return data.every((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const embedding = (item as { embedding?: unknown }).embedding;
+    return (
+      Array.isArray(embedding) &&
+      embedding.length > 0 &&
+      embedding.every((value) => typeof value === "number")
+    );
+  });
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {

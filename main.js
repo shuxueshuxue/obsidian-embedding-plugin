@@ -150,7 +150,7 @@ var SimilarityPanel = class {
       };
       this.registerDomEvent(document, "keydown", this.keyHandler, { capture: true });
       return container;
-    } catch (error) {
+    } catch (e) {
       this.close();
       return null;
     }
@@ -260,13 +260,15 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
         run("metadata-resolved").catch((error) => {
-          new import_obsidian.Notice(`Auto update failed: ${error.message}`);
+          const message = error instanceof Error ? error.message : String(error);
+          new import_obsidian.Notice(`Auto update failed: ${message}`);
         });
       })
     );
     this.app.workspace.onLayoutReady(() => {
       run("layout-ready").catch((error) => {
-        new import_obsidian.Notice(`Auto update failed: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        new import_obsidian.Notice(`Auto update failed: ${message}`);
       });
     });
   }
@@ -287,8 +289,9 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
         this.panel.update(updated.header, updated.items, updated.message, "(Updated)", updateHotkeys);
       }
     } catch (error) {
-      new import_obsidian.Notice(`Error showing connections: ${error.message}`);
-      this.panel.open("Error", [], `Error: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      new import_obsidian.Notice(`Error showing connections: ${message}`);
+      this.panel.open("Error", [], `Error: ${message}`);
     }
   }
   async updateAllEmbeddings(options = {}) {
@@ -516,7 +519,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     await this.app.vault.adapter.write(EMBEDDINGS_FILE, JSON.stringify(cache, null, 2));
   }
   async getEmbedding(text) {
-    var _a, _b;
     this.ensureApiKey();
     const trimmed = text.slice(0, this.settings.maxInputChars);
     if (!trimmed) {
@@ -539,11 +541,10 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
       throw new Error(`Embedding request failed: ${response.status} ${response.text}`);
     }
     const result = response.json;
-    const embedding = (_b = (_a = result == null ? void 0 : result.data) == null ? void 0 : _a[0]) == null ? void 0 : _b.embedding;
-    if (!Array.isArray(embedding)) {
+    if (!isEmbeddingApiResponse(result) || result.data.length === 0) {
       throw new Error("Embedding response missing embedding data.");
     }
-    return embedding;
+    return result.data[0].embedding;
   }
   async getEmbeddingsBatch(texts) {
     this.ensureApiKey();
@@ -579,7 +580,7 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
       throw new Error(`Embedding batch failed: ${response.status} ${response.text}`);
     }
     const result = response.json;
-    if (!Array.isArray(result == null ? void 0 : result.data)) {
+    if (!isEmbeddingApiResponse(result)) {
       throw new Error("Embedding batch response missing data list.");
     }
     if (result.data.length !== trimmed.length) {
@@ -588,9 +589,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     const output = texts.map(() => null);
     result.data.forEach((item, idx) => {
       const originalIndex = indexMap[idx];
-      if (!Array.isArray(item.embedding)) {
-        return;
-      }
       output[originalIndex] = item.embedding;
     });
     return output;
@@ -601,7 +599,9 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     }
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loaded = await this.loadData();
+    const safeLoaded = loaded && typeof loaded === "object" ? loaded : {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, safeLoaded);
   }
   async saveSettings() {
     await this.saveData(this.settings);
@@ -615,7 +615,7 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("API key").setDesc("Openai api key used to generate embeddings.").addText(
+    new import_obsidian.Setting(containerEl).setName("API key").setDesc("OpenAI API key used to generate embeddings.").addText(
       (text) => text.setPlaceholder("Enter API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
@@ -665,6 +665,22 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
     );
   }
 };
+function isEmbeddingApiResponse(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const data = value.data;
+  if (!Array.isArray(data)) {
+    return false;
+  }
+  return data.every((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const embedding = item.embedding;
+    return Array.isArray(embedding) && embedding.length > 0 && embedding.every((value2) => typeof value2 === "number");
+  });
+}
 function cosineSimilarity(a, b) {
   if (!a || !b || a.length !== b.length) {
     return 0;
