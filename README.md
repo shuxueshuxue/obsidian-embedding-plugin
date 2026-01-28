@@ -2,6 +2,8 @@
 
 Semantic, keyboard-first navigation for your vault. This plugin builds embeddings for your notes and opens a floating pop-out panel so you can jump through related ideas without touching the sidebar.
 
+![Embedding pop-out panel](assets/embedding-popout.jpg)
+
 Currently supports OpenAI embeddings via an OpenAI API key.
 
 ## What it feels like

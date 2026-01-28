@@ -635,7 +635,7 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("API key").setDesc("Openai api key used to generate embeddings.").addText(
+    new import_obsidian.Setting(containerEl).setName("API key").addText(
       (text) => text.setPlaceholder("Enter API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();

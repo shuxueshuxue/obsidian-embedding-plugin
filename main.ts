@@ -773,7 +773,6 @@ class EmbeddingSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API key")
-      .setDesc("Openai api key used to generate embeddings.")
       .addText((text) =>
         text
           .setPlaceholder("Enter API key")
