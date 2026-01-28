@@ -18,30 +18,17 @@ Semantic, keyboard-first navigation for your vault. This plugin builds embedding
 
 ## Commands
 - `See connections for current note`
-- `Update all embeddings`
+- `Update all note vectors`
 
 ## Settings
-- API key
-- API base URL
+- Api key
+- Api base url
 - Model
 - Dimensions
 - Max input chars
 - Similarity limit
 - Batch size
 - Auto update on startup
-- MCP server enabled + port
-- Cherry Studio JSON (copy helper)
-
-## MCP server (optional)
-The plugin can expose semantic search over a local MCP JSON-RPC server, so external AI chat apps can query your vault and “learn you better”.
-
-- Endpoint: `http://127.0.0.1:<port>/mcp`
-- Tools: `semantic_search_text`, `semantic_search_note`, `fetch_note`
-- Search tools return note paths plus content (full < 3k chars, 1k snippet if longer)
-- Cherry Studio: open MCP settings → JSON import, then paste the config from the plugin settings
-- Missing notes are reported as `missingPaths` and pruned from `embeddings.json`
-
-The MCP server is **local-only** (127.0.0.1) and can be disabled in settings.
 
 ## Installation (manual)
 1) Copy this folder to `YOUR_VAULT/.obsidian/plugins/embedding/`
@@ -50,8 +37,8 @@ The MCP server is **local-only** (127.0.0.1) and can be disabled in settings.
 4) Enable the plugin in Obsidian
 
 ## Usage
-1) Configure your API key in settings.
-2) Run `Update all embeddings` once to generate `embeddings.json`.
+1) Configure your Api key in settings.
+2) Run `Update all note vectors` once to generate `embeddings.json`.
 3) Run `See connections for current note` to open the pop-out panel.
 
 ## Data
