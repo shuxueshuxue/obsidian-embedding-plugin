@@ -185,7 +185,7 @@ class SimilarityPanel {
 
       return container;
     } catch (error) {
-      console.error("Error creating similarity panel:", error);
+      // console.error("Error creating similarity panel:", error);
       this.close();
       return null;
     }
@@ -324,7 +324,7 @@ export default class EmbeddingPlugin extends Plugin {
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
         run("metadata-resolved").catch((error) => {
-          console.error("Auto update failed:", error);
+          // console.error("Auto update failed:", error);
           new Notice(`Auto update failed: ${error.message}`);
         });
       })
@@ -332,7 +332,7 @@ export default class EmbeddingPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() => {
       run("layout-ready").catch((error) => {
-        console.error("Auto update failed:", error);
+        // console.error("Auto update failed:", error);
         new Notice(`Auto update failed: ${error.message}`);
       });
     });
@@ -357,7 +357,7 @@ export default class EmbeddingPlugin extends Plugin {
         this.panel.update(updated.header, updated.items, updated.message, "(Updated)", updateHotkeys);
       }
     } catch (error) {
-      console.error("Error showing connections:", error);
+      // console.error("Error showing connections:", error);
       new Notice(`Error showing connections: ${error.message}`);
       this.panel.open("Error", [], `Error: ${error.message}`);
     }

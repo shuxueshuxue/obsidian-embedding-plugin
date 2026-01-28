@@ -151,7 +151,6 @@ var SimilarityPanel = class {
       this.registerDomEvent(document, "keydown", this.keyHandler, { capture: true });
       return container;
     } catch (error) {
-      console.error("Error creating similarity panel:", error);
       this.close();
       return null;
     }
@@ -261,14 +260,12 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
         run("metadata-resolved").catch((error) => {
-          console.error("Auto update failed:", error);
           new import_obsidian.Notice(`Auto update failed: ${error.message}`);
         });
       })
     );
     this.app.workspace.onLayoutReady(() => {
       run("layout-ready").catch((error) => {
-        console.error("Auto update failed:", error);
         new import_obsidian.Notice(`Auto update failed: ${error.message}`);
       });
     });
@@ -290,7 +287,6 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
         this.panel.update(updated.header, updated.items, updated.message, "(Updated)", updateHotkeys);
       }
     } catch (error) {
-      console.error("Error showing connections:", error);
       new import_obsidian.Notice(`Error showing connections: ${error.message}`);
       this.panel.open("Error", [], `Error: ${error.message}`);
     }
