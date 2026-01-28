@@ -21,8 +21,8 @@ Semantic, keyboard-first navigation for your vault. This plugin builds embedding
 - `Update all note vectors`
 
 ## Settings
-- Api key
-- Api base url
+- API key
+- API base URL
 - Model
 - Dimensions
 - Max input chars
@@ -37,7 +37,7 @@ Semantic, keyboard-first navigation for your vault. This plugin builds embedding
 4) Enable the plugin in Obsidian
 
 ## Usage
-1) Configure your Api key in settings.
+1) Configure your API key in settings.
 2) Run `Update all note vectors` once to generate `embeddings.json`.
 3) Run `See connections for current note` to open the pop-out panel.
 

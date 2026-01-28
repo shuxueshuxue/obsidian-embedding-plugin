@@ -223,7 +223,7 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
         return;
       }
       if (action.type === "refresh") {
-        this.showConnectionsForCurrentNote();
+        void this.showConnectionsForCurrentNote();
       }
     });
     this.addCommand({
@@ -601,7 +601,7 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
   }
   ensureApiKey() {
     if (!this.settings.apiKey) {
-      throw new Error("Api key is missing. Add it in the plugin settings.");
+      throw new Error("API key is missing. Add it in the plugin settings.");
     }
   }
   async loadSettings() {
@@ -619,14 +619,14 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Api key").setDesc("Openai api key used to generate embeddings.").addText(
-      (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("API key").setDesc("OpenAI API key used to generate embeddings.").addText(
+      (text) => text.setPlaceholder("Enter API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Api base url").setDesc("Base url for the embeddings api.").addText(
-      (text) => text.setPlaceholder("https://api.openai.com/v1").setValue(this.plugin.settings.apiBaseUrl).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("API base URL").setDesc("Base URL for the embeddings API.").addText(
+      (text) => text.setPlaceholder("Enter API base URL").setValue(this.plugin.settings.apiBaseUrl).onChange(async (value) => {
         this.plugin.settings.apiBaseUrl = value.trim();
         await this.plugin.saveSettings();
       })
@@ -643,7 +643,7 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Max input chars").setDesc("Maximum characters sent to the embedding api.").addText(
+    new import_obsidian.Setting(containerEl).setName("Max input chars").setDesc("Maximum characters sent to the embedding API.").addText(
       (text) => text.setPlaceholder(String(DEFAULT_SETTINGS.maxInputChars)).setValue(String(this.plugin.settings.maxInputChars)).onChange(async (value) => {
         this.plugin.settings.maxInputChars = Number(value) || DEFAULT_SETTINGS.maxInputChars;
         await this.plugin.saveSettings();

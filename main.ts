@@ -278,7 +278,7 @@ export default class EmbeddingPlugin extends Plugin {
         return;
       }
       if (action.type === "refresh") {
-        this.showConnectionsForCurrentNote();
+        void this.showConnectionsForCurrentNote();
       }
     });
 
@@ -723,7 +723,7 @@ export default class EmbeddingPlugin extends Plugin {
 
   private ensureApiKey() {
     if (!this.settings.apiKey) {
-      throw new Error("Api key is missing. Add it in the plugin settings.");
+      throw new Error("API key is missing. Add it in the plugin settings.");
     }
   }
 
@@ -749,11 +749,11 @@ class EmbeddingSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("Api key")
-      .setDesc("Openai api key used to generate embeddings.")
+      .setName("API key")
+      .setDesc("OpenAI API key used to generate embeddings.")
       .addText((text) =>
         text
-          .setPlaceholder("sk-...")
+          .setPlaceholder("Enter API key")
           .setValue(this.plugin.settings.apiKey)
           .onChange(async (value) => {
             this.plugin.settings.apiKey = value.trim();
@@ -762,11 +762,11 @@ class EmbeddingSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Api base url")
-      .setDesc("Base url for the embeddings api.")
+      .setName("API base URL")
+      .setDesc("Base URL for the embeddings API.")
       .addText((text) =>
         text
-          .setPlaceholder("https://api.openai.com/v1")
+          .setPlaceholder("Enter API base URL")
           .setValue(this.plugin.settings.apiBaseUrl)
           .onChange(async (value) => {
             this.plugin.settings.apiBaseUrl = value.trim();
@@ -802,7 +802,7 @@ class EmbeddingSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Max input chars")
-      .setDesc("Maximum characters sent to the embedding api.")
+      .setDesc("Maximum characters sent to the embedding API.")
       .addText((text) =>
         text
           .setPlaceholder(String(DEFAULT_SETTINGS.maxInputChars))
