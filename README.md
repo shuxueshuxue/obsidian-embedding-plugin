@@ -20,6 +20,9 @@ Currently supports OpenAI embeddings via an OpenAI API key.
 - Optional auto-update on startup (same logic as manual update)
 - Configurable model, dimensions, and API base URL
 
+## MCP status
+The community build does not include the MCP server (local HTTP servers are not permitted by Obsidian review). If you need MCP integration, use a private fork or a local build.
+
 ## Commands
 - `See connections for current note`
 - `Update all note vectors`
