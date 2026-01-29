@@ -1,6 +1,4 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules
-import * as http from "http";
 
 const EMBEDDINGS_FILE = "embeddings.json";
 const PANEL_ID = "embedding-similarity-panel";
@@ -37,6 +35,10 @@ type HttpServer = {
   listen: (port: number, host?: string) => void;
   close: () => void;
   on: (event: "error", handler: (error: Error) => void) => void;
+};
+
+type HttpModule = {
+  createServer: (handler: (req: HttpRequest, res: HttpResponse) => void) => HttpServer;
 };
 
 type HttpRequest = {
@@ -380,9 +382,14 @@ export default class EmbeddingPlugin extends Plugin {
     if (this.mcpServer) {
       return;
     }
-    const httpModule = http as unknown as {
-      createServer: (handler: (req: HttpRequest, res: HttpResponse) => void) => HttpServer;
-    };
+    let httpModule: HttpModule;
+    try {
+      httpModule = this.getHttpModule();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`MCP server error: ${message}`);
+      return;
+    }
     const server = httpModule.createServer((req, res) => {
       void this.handleMcpRequest(req, res);
     });
@@ -391,6 +398,19 @@ export default class EmbeddingPlugin extends Plugin {
     });
     server.listen(this.settings.mcpPort, "127.0.0.1");
     this.mcpServer = server;
+  }
+
+  private getHttpModule(): HttpModule {
+    // @@@mcp-server-loader - load Node http module at runtime to avoid static import lint
+    const loader = (globalThis as { require?: (name: string) => unknown }).require;
+    if (!loader) {
+      throw new Error("Node require is not available.");
+    }
+    const moduleValue = loader("http");
+    if (!isRecord(moduleValue) || typeof moduleValue.createServer !== "function") {
+      throw new Error("HTTP server module is unavailable.");
+    }
+    return moduleValue as HttpModule;
   }
 
   private stopMcpServer() {

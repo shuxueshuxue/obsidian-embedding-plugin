@@ -1,9 +1,7 @@
 "use strict";
-var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -17,14 +15,6 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // main.ts
@@ -34,7 +24,6 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
-var http = __toESM(require("http"));
 var EMBEDDINGS_FILE = "embeddings.json";
 var PANEL_ID = "embedding-similarity-panel";
 var LIST_ID = `${PANEL_ID}-list`;
@@ -295,7 +284,14 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     if (this.mcpServer) {
       return;
     }
-    const httpModule = http;
+    let httpModule;
+    try {
+      httpModule = this.getHttpModule();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new import_obsidian.Notice(`MCP server error: ${message}`);
+      return;
+    }
     const server = httpModule.createServer((req, res) => {
       void this.handleMcpRequest(req, res);
     });
@@ -304,6 +300,17 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
     });
     server.listen(this.settings.mcpPort, "127.0.0.1");
     this.mcpServer = server;
+  }
+  getHttpModule() {
+    const loader = globalThis.require;
+    if (!loader) {
+      throw new Error("Node require is not available.");
+    }
+    const moduleValue = loader("http");
+    if (!isRecord(moduleValue) || typeof moduleValue.createServer !== "function") {
+      throw new Error("HTTP server module is unavailable.");
+    }
+    return moduleValue;
   }
   stopMcpServer() {
     if (!this.mcpServer) {

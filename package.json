@@ -1,6 +1,6 @@
 {
   "name": "embedding",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "main": "main.js",
   "scripts": {
     "build": "esbuild main.ts --bundle --platform=node --target=es2018 --format=cjs --external:obsidian --outfile=main.js"
