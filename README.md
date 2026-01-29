@@ -20,8 +20,8 @@ Currently supports OpenAI embeddings via an OpenAI API key.
 - Optional auto-update on startup (same logic as manual update)
 - Configurable model, dimensions, and API base URL
 
-## MCP status
-The community build does not include the MCP server (local HTTP servers are not permitted by Obsidian review). If you need MCP integration, use a private fork or a local build.
+## MCP server (optional)
+Enable the MCP JSON-RPC server in settings to expose semantic search over `http://127.0.0.1:<port>/mcp`. Tools: `semantic_search_text`, `semantic_search_note`, `fetch_note`.
 
 ## Commands
 - `See connections for current note`

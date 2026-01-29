@@ -1,7 +1,9 @@
 "use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -15,6 +17,14 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // main.ts
@@ -24,6 +34,7 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
+var http = __toESM(require("http"));
 var EMBEDDINGS_FILE = "embeddings.json";
 var PANEL_ID = "embedding-similarity-panel";
 var LIST_ID = `${PANEL_ID}-list`;
@@ -51,7 +62,9 @@ var DEFAULT_SETTINGS = {
   maxInputChars: 1024,
   similarityLimit: 12,
   batchSize: 32,
-  autoUpdateOnStartup: false
+  autoUpdateOnStartup: false,
+  mcpEnabled: false,
+  mcpPort: 7345
 };
 var SimilarityPanel = class {
   constructor(app, registerDomEvent, onAction) {
@@ -212,6 +225,7 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     this.startupUpdateStarted = false;
+    this.mcpServer = null;
   }
   async onload() {
     await this.loadSettings();
@@ -240,11 +254,13 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
       }
     });
     this.addSettingTab(new EmbeddingSettingTab(this.app, this));
+    this.startMcpServer();
     this.scheduleStartupUpdate();
   }
   onunload() {
     var _a;
     (_a = this.panel) == null ? void 0 : _a.close();
+    this.stopMcpServer();
   }
   scheduleStartupUpdate() {
     if (!this.settings.autoUpdateOnStartup) {
@@ -271,6 +287,212 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
         new import_obsidian.Notice(`Auto update failed: ${message}`);
       });
     });
+  }
+  startMcpServer() {
+    if (!this.settings.mcpEnabled) {
+      return;
+    }
+    if (this.mcpServer) {
+      return;
+    }
+    const httpModule = http;
+    const server = httpModule.createServer((req, res) => {
+      void this.handleMcpRequest(req, res);
+    });
+    server.on("error", (error) => {
+      new import_obsidian.Notice(`MCP server error: ${error.message}`);
+    });
+    server.listen(this.settings.mcpPort, "127.0.0.1");
+    this.mcpServer = server;
+  }
+  stopMcpServer() {
+    if (!this.mcpServer) {
+      return;
+    }
+    this.mcpServer.close();
+    this.mcpServer = null;
+  }
+  refreshMcpServer() {
+    this.stopMcpServer();
+    this.startMcpServer();
+  }
+  async handleMcpRequest(req, res) {
+    var _a, _b;
+    const url = new URL((_a = req.url) != null ? _a : "/", "http://127.0.0.1");
+    if (url.pathname !== "/mcp") {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+    const body = await this.readRequestBody(req);
+    const payload = this.parseJson(body);
+    if (!isMcpRequest(payload)) {
+      this.sendMcpError(res, null, -32600, "Invalid request");
+      return;
+    }
+    const requestId = (_b = payload.id) != null ? _b : null;
+    if (payload.method === "initialize") {
+      this.sendMcpResult(res, requestId, {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "embedding-search", version: this.manifest.version }
+      });
+      return;
+    }
+    if (payload.method === "tools/list") {
+      this.sendMcpResult(res, requestId, {
+        tools: [
+          {
+            name: "semantic_search_text",
+            description: "Semantic search for a freeform text query.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string" },
+                limit: { type: "number" }
+              },
+              required: ["query"]
+            }
+          },
+          {
+            name: "semantic_search_note",
+            description: "Semantic search for notes related to a given note title or path.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                note: { type: "string" },
+                limit: { type: "number" }
+              },
+              required: ["note"]
+            }
+          },
+          {
+            name: "fetch_note",
+            description: "Fetch the full content of a note by path.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                path: { type: "string" }
+              },
+              required: ["path"]
+            }
+          }
+        ]
+      });
+      return;
+    }
+    if (payload.method === "tools/call") {
+      const params = isRecord(payload.params) ? payload.params : {};
+      const name = typeof params.name === "string" ? params.name : "";
+      const args = isRecord(params.arguments) ? params.arguments : {};
+      if (!name) {
+        this.sendMcpError(res, requestId, -32602, "Missing tool name");
+        return;
+      }
+      try {
+        const result = await this.handleToolCall(name, args);
+        this.sendMcpResult(res, requestId, {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: false
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.sendMcpError(res, requestId, -32603, message);
+      }
+      return;
+    }
+    this.sendMcpError(res, requestId, -32601, "Method not found");
+  }
+  sendMcpResult(res, id, result) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id, result }));
+  }
+  sendMcpError(res, id, code, message) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }));
+  }
+  parseJson(text) {
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return null;
+    }
+  }
+  readRequestBody(req) {
+    return new Promise((resolve, reject) => {
+      let body = "";
+      const decoder = new TextDecoder("utf-8");
+      req.on("data", (chunk) => {
+        if (chunk instanceof Uint8Array) {
+          body += decoder.decode(chunk, { stream: true });
+        }
+      });
+      req.on("end", () => {
+        body += decoder.decode();
+        resolve(body);
+      });
+      req.on("error", (error) => {
+        const err = error instanceof Error ? error : new Error(String(error));
+        reject(err);
+      });
+    });
+  }
+  async handleToolCall(name, args) {
+    if (name === "semantic_search_text") {
+      return this.semanticSearchText(args);
+    }
+    if (name === "semantic_search_note") {
+      return this.semanticSearchNote(args);
+    }
+    if (name === "fetch_note") {
+      return this.fetchNoteContent(args);
+    }
+    throw new Error(`Unknown tool: ${name}`);
+  }
+  async semanticSearchText(args) {
+    const query = typeof args.query === "string" ? args.query.trim() : "";
+    if (!query) {
+      throw new Error("query is required");
+    }
+    const limit = this.normalizeLimit(args.limit);
+    const embedding = await this.getEmbedding(query);
+    if (!embedding) {
+      throw new Error("Failed to generate embedding for query");
+    }
+    const cache = await this.loadEmbeddings();
+    const scores = this.calculateSimilarityScores(embedding, cache, null);
+    const { results, missingPaths } = await this.buildSearchResults(scores.slice(0, limit), cache);
+    return { query, results, missingPaths };
+  }
+  async semanticSearchNote(args) {
+    const note = typeof args.note === "string" ? args.note.trim() : "";
+    if (!note) {
+      throw new Error("note is required");
+    }
+    const limit = this.normalizeLimit(args.limit);
+    const file = this.resolveNoteFile(note);
+    const cache = await this.loadEmbeddings();
+    const embedding = await this.ensureEmbeddingForFile(file, cache);
+    const scores = this.calculateSimilarityScores(embedding, cache, file.path);
+    const { results, missingPaths } = await this.buildSearchResults(scores.slice(0, limit), cache);
+    return { note: file.path, results, missingPaths };
+  }
+  async fetchNoteContent(args) {
+    const path = typeof args.path === "string" ? args.path.trim() : "";
+    if (!path) {
+      throw new Error("path is required");
+    }
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof import_obsidian.TFile)) {
+      throw new Error(`Note not found: ${path}`);
+    }
+    const content = await this.app.vault.read(file);
+    return { path: file.path, content };
   }
   async showConnectionsForCurrentNote() {
     const file = this.app.workspace.getActiveFile();
@@ -360,6 +582,96 @@ var EmbeddingPlugin = class extends import_obsidian.Plugin {
       await this.saveEmbeddings(cache);
     }
     new import_obsidian.Notice(`Embedding update complete. Added: ${added}. Updated: ${updated}.`);
+  }
+  async ensureEmbeddingForFile(file, cache) {
+    const entry = cache[file.path];
+    const reason = this.getUpdateReason(file, entry, false);
+    if (!reason) {
+      const cachedEmbedding = Array.isArray(entry) ? entry : entry == null ? void 0 : entry.embedding;
+      if (!cachedEmbedding) {
+        throw new Error(`Missing embedding for ${file.path}`);
+      }
+      return cachedEmbedding;
+    }
+    const text = (await this.app.vault.read(file)).trim();
+    if (!text) {
+      throw new Error(`Note is empty: ${file.path}`);
+    }
+    const embedding = await this.getEmbedding(text);
+    if (!embedding) {
+      throw new Error(`Failed to generate embedding for ${file.path}`);
+    }
+    cache[file.path] = {
+      embedding,
+      last_updated: new Date(file.stat.mtime).toISOString()
+    };
+    await this.saveEmbeddings(cache);
+    return embedding;
+  }
+  resolveNoteFile(note) {
+    const direct = this.app.metadataCache.getFirstLinkpathDest(note, "");
+    if (direct) {
+      return direct;
+    }
+    if (!note.endsWith(".md")) {
+      const withMd = this.app.metadataCache.getFirstLinkpathDest(`${note}.md`, "");
+      if (withMd) {
+        return withMd;
+      }
+    }
+    throw new Error(`Note not found: ${note}`);
+  }
+  calculateSimilarityScores(currentEmbedding, cache, excludePath) {
+    const results = [];
+    for (const [path, entry] of Object.entries(cache)) {
+      if (excludePath && path === excludePath) {
+        continue;
+      }
+      if (!path.endsWith(".md")) {
+        continue;
+      }
+      const otherEmbedding = Array.isArray(entry) ? entry : entry.embedding;
+      if (!otherEmbedding) {
+        continue;
+      }
+      const score = cosineSimilarity(currentEmbedding, otherEmbedding);
+      results.push({ path, score });
+    }
+    results.sort((a, b) => b.score - a.score);
+    return results;
+  }
+  async buildSearchResults(scores, cache) {
+    const results = [];
+    const missingPaths = [];
+    for (const item of scores) {
+      const file = this.app.vault.getAbstractFileByPath(item.path);
+      if (!(file instanceof import_obsidian.TFile)) {
+        missingPaths.push(item.path);
+        continue;
+      }
+      const content = await this.app.vault.read(file);
+      const isTruncated = content.length >= 3e3;
+      results.push({
+        path: file.path,
+        score: item.score,
+        content: isTruncated ? content.slice(0, 1e3) : content,
+        truncated: isTruncated
+      });
+    }
+    if (missingPaths.length) {
+      for (const path of missingPaths) {
+        delete cache[path];
+      }
+      await this.saveEmbeddings(cache);
+    }
+    return { results, missingPaths };
+  }
+  normalizeLimit(limit) {
+    const parsed = typeof limit === "number" ? limit : typeof limit === "string" ? Number(limit) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    return this.settings.similarityLimit;
   }
   getInitialDisplayData(file, cache) {
     let header = "Most similar files:";
@@ -683,6 +995,21 @@ var EmbeddingSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Mcp server enabled").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
+        this.plugin.settings.mcpEnabled = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshMcpServer();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Mcp server port").addText(
+      (text) => text.setPlaceholder(String(DEFAULT_SETTINGS.mcpPort)).setValue(String(this.plugin.settings.mcpPort)).onChange(async (value) => {
+        const nextPort = Number(value) || DEFAULT_SETTINGS.mcpPort;
+        this.plugin.settings.mcpPort = nextPort;
+        await this.plugin.saveSettings();
+        this.plugin.refreshMcpServer();
+      })
+    );
   }
 };
 function isEmbeddingApiResponse(value) {
@@ -700,6 +1027,18 @@ function isEmbeddingApiResponse(value) {
     const embedding = item.embedding;
     return Array.isArray(embedding) && embedding.length > 0 && embedding.every((value2) => typeof value2 === "number");
   });
+}
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function isMcpRequest(value) {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.jsonrpc !== "2.0") {
+    return false;
+  }
+  return typeof value.method === "string";
 }
 function cosineSimilarity(a, b) {
   if (!a || !b || a.length !== b.length) {
